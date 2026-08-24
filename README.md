@@ -272,5 +272,9 @@ open ShadowPlay.xcodeproj
 # Run on the Simulator: manual pairing mode works there (no camera needed)
 ```
 
+> CI pins XcodeGen to **2.45.0** and selects `latest-stable` Xcode explicitly, because
+> newer generators emit a project file format (`objectVersion 77`) that older Xcodes
+> refuse to open. Locally, use any recent XcodeGen + Xcode 15/16 combination.
+
 The CI-produced IPA is **unsigned**: sideload it with AltStore/Sideloadly or open the
 project in Xcode and sign with your own Apple ID for device installs.

@@ -7,7 +7,9 @@ options:
 
 settings:
   base:
-    SWIFT_VERSION: "5.9"
+    # Valid SWIFT_VERSION values are major-mode numbers (4.0/4.2/5.0/6.0).
+    # "5.0" means "latest Swift 5 language mode", which this code targets.
+    SWIFT_VERSION: "5.0"
 
 targets:
   ShadowPlay:

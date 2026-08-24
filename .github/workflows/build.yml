@@ -57,24 +57,57 @@ jobs:
 
   ios:
     name: iOS ipa (unsigned, macOS runner)
-    runs-on: macos-14
+    # macos-15 ships modern Xcodes that read current project formats.
+    runs-on: macos-15
     defaults:
       run:
         working-directory: ios
     steps:
       - uses: actions/checkout@v4
 
-      # The repo commits project.yml only; the .xcodeproj is generated.
-      - name: Generate Xcode project
-        run: |
-          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
-          xcodegen generate
-          test -d ShadowPlay.xcodeproj
+      # Make the toolchain explicit instead of relying on the runner default,
+      # which can drift independently of our generator.
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
 
       - name: Show toolchain
         run: |
           xcodebuild -version
           swift --version
+
+      # Pin the generator so the emitted .xcodeproj format is deterministic.
+      # Recent XcodeGen releases emit objectVersion 77 (Xcode 16.3+ format),
+      # which broke archives on runners with older Xcode. 2.45.0 emits <= 60,
+      # readable by every Xcode we target.
+      - name: Install pinned XcodeGen
+        run: |
+          curl -fsSL -o /tmp/xcodegen.zip https://github.com/yonaskolb/XcodeGen/releases/download/2.45.0/xcodegen.zip
+          rm -rf /tmp/xcodegen-tmp && unzip -q /tmp/xcodegen.zip -d /tmp/xcodegen-tmp
+          sudo mkdir -p /usr/local/bin
+          sudo mv /tmp/xcodegen-tmp/xcodegen/bin/xcodegen /usr/local/bin/xcodegen
+          chmod +x /usr/local/bin/xcodegen
+          echo "xcodegen $(xcodegen --version)"
+
+      # The repo commits project.yml only; the .xcodeproj is generated.
+      - name: Generate Xcode project
+        run: |
+          xcodegen generate
+          test -d ShadowPlay.xcodeproj
+
+      # Tripwire: fail here with a clear message if the generator ever starts
+      # emitting a project format newer than Xcode 15 understands.
+      - name: Verify project format compatibility
+        run: |
+          version_line=$(grep -m1 'objectVersion' ShadowPlay.xcodeproj/project.pbxproj)
+          echo "$version_line"
+          version=$(echo "$version_line" | tr -dc '0-9')
+          if [ -z "$version" ] || [ "$version" -gt 60 ]; then
+            echo "::error::Generated project format ($version) is newer than Xcode 15 supports."
+            echo "::error::Pin XcodeGen to a release whose bundled XcodeProj emits objectVersion <= 60."
+            exit 1
+          fi
 
       # Unsigned device archive: installable after re-signing (AltStore, Sideloadly,
       # Xcode with a free dev account). See docs/IOS_HANDOFF.md.
