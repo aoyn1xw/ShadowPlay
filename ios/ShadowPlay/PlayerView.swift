@@ -24,7 +24,8 @@ struct PlayerView: View {
             .navigationTitle(clip.fileName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                // .navigationBarTrailing: iOS 16-compatible (topBarTrailing is iOS 17+)
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") { dismiss() }
                 }
             }

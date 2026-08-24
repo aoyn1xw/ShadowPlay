@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import VisionKit
 
 /// Pairing: scan the QR shown by the desktop app, or enter details manually
@@ -38,6 +39,12 @@ struct PairingView: View {
                     scannerSection
                 case .manual:
                     manualForm
+                }
+
+                if let decodeError {
+                    Text(decodeError)
+                        .foregroundStyle(.red)
+                        .font(.footnote)
                 }
 
                 if let errorText {
@@ -206,13 +213,14 @@ struct QRScannerView: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> DataScannerViewController {
         let controller = DataScannerViewController(
-            recognizedDataTypes: [.barcode(symbologies: [.qr])],
-            qualityAdjustment: .balanced)
+            recognizedDataTypes: [.barcode(symbologies: [.qr])]
+        )
         controller.delegate = context.coordinator
         do {
             try controller.startScanning()
         } catch {
-            // Camera unavailable (e.g. Simulator / permission denied).
+            // Camera unavailable (e.g. Simulator / permission denied);
+            // manual entry mode remains usable.
         }
         return controller
     }

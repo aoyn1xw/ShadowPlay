@@ -72,7 +72,9 @@ struct LibraryView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
+        // .navigationBarTrailing (not .topBarTrailing) — the latter is iOS 17+ only
+        // and this app deploys to iOS 16.
+        ToolbarItem(placement: .navigationBarTrailing) {
             Menu {
                 Section("Paired PCs") {
                     ForEach(state.connections) { connection in
