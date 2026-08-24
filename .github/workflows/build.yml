@@ -132,6 +132,27 @@ jobs:
             exit 1
           fi
 
+      # Diagnostics + sanity gate: print resolved product identity and refuse to
+      # archive if PRODUCT_NAME did not resolve. An empty product name produces
+      # a literal '.app' and fails archiving with
+      # "Multiple commands produce '.../Applications/.app'".
+      - name: Assert product name resolves
+        run: |
+          settings=$(xcodebuild -project ShadowPlay.xcodeproj \
+            -scheme ShadowPlay \
+            -configuration Release \
+            -showBuildSettings 2>/dev/null)
+
+          echo "$settings" | grep -E '^[[:space:]]+(TARGET_NAME|PRODUCT_NAME|FULL_PRODUCT_NAME|PRODUCT_BUNDLE_IDENTIFIER)[[:space:]]*='
+
+          product=$(echo "$settings" | awk '/^[[:space:]]*FULL_PRODUCT_NAME[[:space:]]*=/{print $3}')
+          echo "Resolved FULL_PRODUCT_NAME: '${product}'"
+
+          if [ -z "$product" ] || [ "$product" = ".app" ]; then
+            echo "::error::FULL_PRODUCT_NAME did not resolve (got '$product'). Check PRODUCT_NAME in project.yml."
+            exit 1
+          fi
+
       # Unsigned device archive: installable after re-signing (AltStore, Sideloadly,
       # Xcode with a free dev account). See docs/IOS_HANDOFF.md.
       - name: Archive (Release, generic iOS device)

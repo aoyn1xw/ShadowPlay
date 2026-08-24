@@ -21,6 +21,11 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.shadowplay.mobile
+        # Pin the product name instead of relying on $(TARGET_NAME) default
+        # resolution: an unresolved PRODUCT_NAME yields a literal ".app"
+        # product, which fails archives with
+        # "Multiple commands produce '.../Applications/.app'".
+        PRODUCT_NAME: ShadowPlay
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "1,2"
