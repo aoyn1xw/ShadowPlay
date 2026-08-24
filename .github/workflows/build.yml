@@ -77,10 +77,10 @@ jobs:
           xcodebuild -version
           swift --version
 
-      # Pin the generator so the emitted .xcodeproj format is deterministic.
-      # Recent XcodeGen releases emit objectVersion 77 (Xcode 16.3+ format),
-      # which broke archives on runners with older Xcode. 2.45.0 emits <= 60,
-      # readable by every Xcode we target.
+      # Pinned purely for determinism of everything EXCEPT objectVersion —
+      # the version->format mapping of XcodeGen releases has already drifted once
+      # (a release predating format 77 still emitted it). Format is enforced
+      # explicitly in the next step instead of trusted from the version number.
       - name: Install pinned XcodeGen
         run: |
           curl -fsSL -o /tmp/xcodegen.zip https://github.com/yonaskolb/XcodeGen/releases/download/2.45.0/xcodegen.zip
@@ -90,22 +90,45 @@ jobs:
           chmod +x /usr/local/bin/xcodegen
           echo "xcodegen $(xcodegen --version)"
 
-      # The repo commits project.yml only; the .xcodeproj is generated.
-      - name: Generate Xcode project
+      # Generate, then normalize the project format for maximum Xcode compatibility.
+      #
+      # Why not trust the generator's objectVersion?
+      # XcodeGen releases have emitted objectVersion 77 (an Xcode 16.3+ format)
+      # regardless of expectations, breaking older Xcodes with:
+      #   "future Xcode project file format (77)"
+      #
+      # Our project uses only classic object types (explicit groups + file refs),
+      # so declaring objectVersion 56 (Xcode 15 baseline) is accurate. We refuse
+      # to normalize if any new-format-only object type appears, so this can
+      # never silently lie about the content.
+      - name: Generate Xcode project (format-normalized)
         run: |
           xcodegen generate
           test -d ShadowPlay.xcodeproj
 
-      # Tripwire: fail here with a clear message if the generator ever starts
-      # emitting a project format newer than Xcode 15 understands.
+          pbxproj="ShadowPlay.xcodeproj/project.pbxproj"
+
+          echo "--- emitted format ---"
+          grep -m1 'objectVersion' "$pbxproj"
+
+          if grep -qE 'PBXFileSystemSynchronized|PBXBuildableFolder|fileSystemSynchronizedGroups' "$pbxproj"; then
+            echo "::error::Project contains Xcode 16.3+ only object types; refusing to normalize objectVersion."
+            exit 1
+          fi
+
+          sed -i '' -E 's/objectVersion = [0-9]+;/objectVersion = 56;/' "$pbxproj"
+
+          echo "--- normalized format ---"
+          grep -m1 'objectVersion' "$pbxproj"
+
+      # Invariant gate: whatever happens upstream, the archived project must be <= 60.
       - name: Verify project format compatibility
         run: |
           version_line=$(grep -m1 'objectVersion' ShadowPlay.xcodeproj/project.pbxproj)
           echo "$version_line"
           version=$(echo "$version_line" | tr -dc '0-9')
           if [ -z "$version" ] || [ "$version" -gt 60 ]; then
-            echo "::error::Generated project format ($version) is newer than Xcode 15 supports."
-            echo "::error::Pin XcodeGen to a release whose bundled XcodeProj emits objectVersion <= 60."
+            echo "::error::Generated project format ($version) is not compatible. Expected 56 after normalization."
             exit 1
           fi
 
