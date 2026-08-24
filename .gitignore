@@ -1,0 +1,35 @@
+# Build artifacts
+bin/
+obj/
+artifacts/
+publish/
+publish-single/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userprefs
+
+# Test results
+TestResults/
+*.trx
+*.coverage
+
+# Logs / local runtime data (app data lives in %LocalAppData%, but be safe)
+logs/
+*.log
+
+# OS
+Thumbs.db
+.DS_Store
+
+# iOS (project generated from project.yml by XcodeGen)
+ios/ShadowPlay.xcodeproj/
+ios/build/
+ios/DerivedData/
+*.ipa
+*.xcuserstate
+xcuserdata/

@@ -1,0 +1,155 @@
+<Window x:Class="ShadowPlay.Windows.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ShadowPlay"
+        Width="720"
+        Height="640"
+        MinWidth="620"
+        MinHeight="520"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="16">
+
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ===================== Top: status + pairing ===================== -->
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <Ellipse Width="12" Height="12"
+                             Fill="{Binding StatusBrush}"
+                             VerticalAlignment="Center"
+                             Margin="0,1,8,0" />
+                    <TextBlock Text="{Binding StatusText}"
+                               FontSize="18"
+                               FontWeight="SemiBold" />
+                </StackPanel>
+
+                <TextBlock Text="{Binding AddressText}"
+                           FontSize="14"
+                           FontFamily="Consolas"
+                           Foreground="#333333" />
+
+                <TextBlock TextWrapping="Wrap"
+                           Foreground="#777777"
+                           FontSize="11.5"
+                           Margin="0,6,0,0"
+                           MaxHeight="60"
+                           TextTrimming="CharacterEllipsis"
+                           Text="{Binding StatusDetail}" />
+
+                <WrapPanel Margin="0,10,0,0">
+                    <Button Content="New pairing code"
+                            Command="{Binding RegeneratePairingCommand}"
+                            Padding="10,4" />
+                    <Button Content="{Binding PauseResumeLabel}"
+                            Command="{Binding ToggleSharingCommand}"
+                            Padding="10,4"
+                            Margin="8,0,0,0" />
+                    <Button Content="Change folder"
+                            Command="{Binding ChangeFolderCommand}"
+                            Padding="10,4"
+                            Margin="8,0,0,0" />
+                    <Button Content="Open folder"
+                            Command="{Binding OpenFolderCommand}"
+                            Padding="10,4"
+                            Margin="8,0,0,0" />
+                </WrapPanel>
+            </StackPanel>
+
+            <!-- QR panel -->
+            <Border Grid.Column="1"
+                    BorderBrush="#DDDDDD"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="10">
+                <StackPanel>
+                    <Image Source="{Binding QrImage}"
+                           Width="150"
+                           Height="150" />
+                    <TextBlock Text="Pair your phone"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center"
+                               Margin="0,6,0,0" />
+                    <TextBlock Text="{Binding PairingHint}"
+                               TextWrapping="Wrap"
+                               Foreground="#777777"
+                               FontSize="11"
+                               Width="150"
+                               TextAlignment="Center" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- ===================== Middle: clips + devices ===================== -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="240" />
+            </Grid.ColumnDefinitions>
+
+            <GroupBox Grid.Column="0"
+                      Header="Recent clips"
+                      Padding="8"
+                      Margin="0,0,8,0">
+                <ListView ItemsSource="{Binding Clips}">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="Name"
+                                            Width="220"
+                                            DisplayMemberBinding="{Binding FileName}" />
+                            <GridViewColumn Header="Size"
+                                            Width="80"
+                                            DisplayMemberBinding="{Binding SizeDisplay}" />
+                            <GridViewColumn Header="Recorded"
+                                            Width="140"
+                                            DisplayMemberBinding="{Binding ModifiedDisplay}" />
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+            </GroupBox>
+
+            <GroupBox Grid.Column="1"
+                      Header="Paired devices"
+                      Padding="8">
+                <ListBox ItemsSource="{Binding Devices}"
+                         HorizontalContentAlignment="Stretch">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel Margin="2">
+                                <Button DockPanel.Dock="Right"
+                                        Content="Revoke"
+                                        Padding="6,2"
+                                        Command="{Binding DataContext.RevokeDeviceCommand,
+                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding DeviceId}" />
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding PairedDisplay}" FontSize="11" Foreground="#888888" />
+                                </StackPanel>
+                            </DockPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </GroupBox>
+        </Grid>
+
+        <!-- ===================== Bottom: notes ===================== -->
+        <TextBlock Grid.Row="3"
+                   TextWrapping="Wrap"
+                   FontSize="11"
+                   Foreground="#999999"
+                   Margin="0,10,0,0"
+                   Text="Clips are shared only on your local Wi-Fi network and only after pairing. Traffic is not encrypted; ShadowPlay never modifies your recordings." />
+
+    </Grid>
+</Window>

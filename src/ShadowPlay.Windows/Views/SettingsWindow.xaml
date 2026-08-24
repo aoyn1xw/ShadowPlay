@@ -1,0 +1,80 @@
+<Window x:Class="ShadowPlay.Windows.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ShadowPlay Settings"
+        Width="520"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False">
+    <StackPanel Margin="20">
+
+        <!-- Watched folder -->
+        <TextBlock Text="Watched folder"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,6" />
+        <DockPanel Margin="0,0,0,4">
+            <Button DockPanel.Dock="Right"
+                    Content="Browse..."
+                    Command="{Binding BrowseCommand}"
+                    Padding="10,3"
+                    Margin="8,0,0,0" />
+            <TextBox Text="{Binding FolderPath, UpdateSourceTrigger=PropertyChanged}"
+                     VerticalContentAlignment="Center"
+                     Padding="5,5" />
+        </DockPanel>
+        <TextBlock Text="ShadowPlay only reads this folder - it never changes your recordings."
+                   FontSize="11"
+                   Foreground="#888888"
+                   Margin="0,0,0,14"
+                   TextWrapping="Wrap" />
+
+        <!-- Network -->
+        <TextBlock Text="Network"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,6" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+            <TextBlock Text="Port:" VerticalAlignment="Center" />
+            <TextBox Text="{Binding PortText, UpdateSourceTrigger=PropertyChanged}"
+                     Width="80"
+                     Margin="8,0,0,0"
+                     Padding="4,4"
+                     VerticalContentAlignment="Center" />
+            <CheckBox Content="Share clips on the local network"
+                      IsChecked="{Binding SharingEnabled}"
+                      VerticalAlignment="Center"
+                      Margin="24,0,0,0" />
+        </StackPanel>
+        <TextBlock Text="Changing the port restarts sharing. Your phone may need to re-pair if the port changes."
+                   FontSize="11"
+                   Foreground="#888888"
+                   TextWrapping="Wrap"
+                   Margin="0,0,0,14" />
+
+        <!-- Status + buttons -->
+        <Border Background="#F5F5F7"
+                CornerRadius="4"
+                Padding="10,8"
+                Margin="0,0,0,14">
+            <TextBlock Text="{Binding Message}"
+                       Foreground="{Binding MessageBrush}"
+                       TextWrapping="Wrap"
+                       MinHeight="34" />
+        </Border>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Cancel"
+                    IsCancel="True"
+                    Padding="14,5"
+                    MinWidth="80" />
+            <Button Content="Save"
+                    Click="OnSaveClick"
+                    IsDefault="True"
+                    Padding="14,5"
+                    MinWidth="80"
+                    Margin="10,0,0,0"
+                    FontWeight="SemiBold" />
+        </StackPanel>
+
+    </StackPanel>
+</Window>

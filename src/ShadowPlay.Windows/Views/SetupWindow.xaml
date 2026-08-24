@@ -1,0 +1,49 @@
+<Window x:Class="ShadowPlay.Windows.Views.SetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Welcome to ShadowPlay"
+        Width="560"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Topmost="True"
+        ShowInTaskbar="True">
+    <StackPanel Margin="24">
+
+        <TextBlock Text="Choose your recordings folder"
+                   FontSize="20"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,8" />
+
+        <TextBlock TextWrapping="Wrap"
+                   Foreground="#555555"
+                   Margin="0,0,0,16"
+                   Text="Pick the folder where NVIDIA App / GeForce Experience saves your game recordings (for example Videos or a custom capture folder). ShadowPlay only reads this folder - it never changes, moves or deletes anything." />
+
+        <DockPanel Margin="0,0,0,8">
+            <Button DockPanel.Dock="Right"
+                    Content="Browse..."
+                    Command="{Binding BrowseCommand}"
+                    Padding="12,4"
+                    Margin="8,0,0,0" />
+            <TextBox Text="{Binding FolderPath, UpdateSourceTrigger=PropertyChanged}"
+                     VerticalContentAlignment="Center"
+                     Padding="6,6" />
+        </DockPanel>
+
+        <TextBlock Text="{Binding Message}"
+                   TextWrapping="Wrap"
+                   Foreground="{Binding MessageBrush}"
+                   MinHeight="40"
+                   Margin="0,0,0,16" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Start ShadowPlay"
+                    Command="{Binding ConfirmCommand}"
+                    IsEnabled="{Binding IsValid}"
+                    Padding="16,6"
+                    FontWeight="SemiBold" />
+        </StackPanel>
+
+    </StackPanel>
+</Window>

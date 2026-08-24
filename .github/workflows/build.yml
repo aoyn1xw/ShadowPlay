@@ -1,0 +1,124 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows exe (win-x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore ShadowPlay.sln
+
+      - name: Build (Release)
+        run: dotnet build ShadowPlay.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test ShadowPlay.sln -c Release --no-build
+
+      - name: Publish win-x64
+        run: dotnet publish src/ShadowPlay.Windows/ShadowPlay.Windows.csproj -c Release -r win-x64 --self-contained false -o publish/win-x64
+
+      - name: Smoke test (headless)
+        shell: pwsh
+        run: |
+          $clips = Join-Path $env:RUNNER_TEMP "smoke-clips"
+          New-Item -ItemType Directory -Force -Path $clips | Out-Null
+          $bytes = New-Object byte[] 40960
+          (New-Object Random 1).NextBytes($bytes)
+          [IO.File]::WriteAllBytes((Join-Path $clips "clip_a.mp4"), $bytes)
+          [IO.File]::WriteAllBytes((Join-Path $clips "clip_b.mp4"), $bytes[0..8191])
+
+          $out = & ".\publish\win-x64\ShadowPlay.exe" --smoke --folder $clips --port 0 --smoke-seconds 12 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) { throw "smoke run exited with $LASTEXITCODE" }
+          if ($out -notmatch 'SMOKE_OK') { throw "health never became ready" }
+          if ($out -notmatch '"clips":2') { throw "expected 2 clips to be detected" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ShadowPlay-win-x64
+          path: publish/win-x64/
+          if-no-files-found: error
+
+  ios:
+    name: iOS ipa (unsigned, macOS runner)
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v4
+
+      # The repo commits project.yml only; the .xcodeproj is generated.
+      - name: Generate Xcode project
+        run: |
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          xcodegen generate
+          test -d ShadowPlay.xcodeproj
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # Unsigned device archive: installable after re-signing (AltStore, Sideloadly,
+      # Xcode with a free dev account). See docs/IOS_HANDOFF.md.
+      - name: Archive (Release, generic iOS device)
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project ShadowPlay.xcodeproj \
+            -scheme ShadowPlay \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/ShadowPlay.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" | tail -n 40
+
+      - name: Package IPA
+        run: |
+          mkdir -p build/Payload
+          cp -R "build/ShadowPlay.xcarchive/Products/Applications/ShadowPlay.app" build/Payload/
+          cd build
+          zip -qry ShadowPlay-unsigned.ipa Payload
+          ls -lh ShadowPlay-unsigned.ipa
+
+      # Convenience artifact for quick smoke checks without signing.
+      - name: Build simulator app
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project ShadowPlay.xcodeproj \
+            -scheme ShadowPlay \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/sim \
+            CODE_SIGNING_ALLOWED=NO | tail -n 20
+          cd build/sim/Build/Products/Debug-iphonesimulator
+          zip -qry "$GITHUB_WORKSPACE/ios/build/ShadowPlay-simulator.zip" ShadowPlay.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ShadowPlay-ios-unsigned-ipa
+          path: ios/build/ShadowPlay-unsigned.ipa
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ShadowPlay-ios-simulator-app
+          path: ios/build/ShadowPlay-simulator.zip
+          if-no-files-found: error
