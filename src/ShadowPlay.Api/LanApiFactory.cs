@@ -71,6 +71,45 @@ public static class LanApiFactory
             }
         });
 
+        app.Use(async (context, next) =>
+        {
+            var isPairingDiagnosticPath = context.Request.Path.Equals(
+                    $"{LanApiEndpoints.BasePath}/health",
+                    StringComparison.OrdinalIgnoreCase)
+                || context.Request.Path.Equals(
+                    $"{LanApiEndpoints.BasePath}/pair/exchange",
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (!isPairingDiagnosticPath)
+            {
+                await next(context).ConfigureAwait(false);
+                return;
+            }
+
+            var logger = context.RequestServices.GetRequiredService<ILoggerFactory>()
+                .CreateLogger("ShadowPlay.Api.Network");
+            var remote = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            logger.LogInformation(
+                "Incoming LAN request {Method} {Path} from {RemoteIp}",
+                context.Request.Method,
+                context.Request.Path,
+                remote);
+
+            try
+            {
+                await next(context).ConfigureAwait(false);
+            }
+            finally
+            {
+                logger.LogInformation(
+                    "Completed LAN request {Method} {Path} from {RemoteIp} with HTTP {StatusCode}",
+                    context.Request.Method,
+                    context.Request.Path,
+                    remote,
+                    context.Response.StatusCode);
+            }
+        });
+
         app.UseMiddleware<PrivateNetworkMiddleware>(options.RestrictToPrivateNetworks);
         app.UseMiddleware<BearerAuthMiddleware>(options.Devices);
 

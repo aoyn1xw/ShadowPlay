@@ -45,6 +45,7 @@ public sealed class AppController : IAsyncDisposable
     private readonly ClipCatalog _catalog;
     private readonly IPairingService _pairing;
     private readonly IDeviceRegistry _devices;
+    private readonly IWindowsFirewallService _firewall;
     private readonly ILogger<AppController>? _logger;
 
     private WebApplication? _apiApp;
@@ -57,6 +58,7 @@ public sealed class AppController : IAsyncDisposable
         ClipCatalog catalog,
         IPairingService pairing,
         IDeviceRegistry devices,
+        IWindowsFirewallService firewall,
         ILogger<AppController>? logger = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -64,6 +66,7 @@ public sealed class AppController : IAsyncDisposable
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _pairing = pairing ?? throw new ArgumentNullException(nameof(pairing));
         _devices = devices ?? throw new ArgumentNullException(nameof(devices));
+        _firewall = firewall ?? throw new ArgumentNullException(nameof(firewall));
         _logger = logger;
 
         _catalog.Changed += () => StateChanged?.Invoke();
@@ -72,6 +75,11 @@ public sealed class AppController : IAsyncDisposable
     public event Action? StateChanged;
 
     public ControllerStatus Status { get; private set; } = ControllerStatus.NotConfigured;
+
+    public FirewallStatus FirewallStatus { get; private set; } = new(
+        FirewallRuleState.Unavailable,
+        "Firewall status has not been checked yet.",
+        false);
 
     public bool IsConfigured => !string.IsNullOrWhiteSpace(_settings.Current.RecordingsFolder);
 
@@ -198,6 +206,25 @@ public sealed class AppController : IAsyncDisposable
             _apiApp = app;
             _actualPort = port.Value;
 
+            var listenerAddresses = GetServerAddresses(app);
+            _logger?.LogInformation(
+                "LAN API listening on {ListenerAddresses}; Kestrel bind is IPv4 wildcard (IPAddress.Any), configured port {Port}",
+                string.Join(", ", listenerAddresses),
+                _actualPort);
+
+            var executablePath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
+            if (!string.IsNullOrWhiteSpace(executablePath))
+            {
+                FirewallStatus = _firewall.Check(executablePath, _actualPort);
+                _logger?.LogInformation(
+                    "Firewall check for {ExecutablePath} TCP {Port}: {State}. {Detail} Private profile active: {PrivateProfileActive}",
+                    executablePath,
+                    _actualPort,
+                    FirewallStatus.State,
+                    FirewallStatus.Detail,
+                    FirewallStatus.PrivateNetworkActive);
+            }
+
             _monitor = new ClipMonitorService(
                 () => _settings.Current.RecordingsFolder,
                 _catalog,
@@ -270,7 +297,13 @@ public sealed class AppController : IAsyncDisposable
             offer = _pairing.NewPairingOffer();
         }
 
-        var address = LocalIpLocator.FindBestIpv4()?.ToString() ?? IPAddress.Loopback.ToString();
+        var endpoint = LocalIpLocator.FindBestEndpoint();
+        var address = endpoint?.Address.ToString() ?? IPAddress.Loopback.ToString();
+        _logger?.LogInformation(
+            "Selected LAN interface {InterfaceName} with IPv4 {Address} for pairing QR (default gateway: {HasDefaultGateway})",
+            endpoint?.InterfaceName ?? "loopback",
+            address,
+            endpoint?.HasDefaultGateway ?? false);
         var payload = new QrPayload
         {
             ServerId = _settings.Current.ServerId,
@@ -291,6 +324,40 @@ public sealed class AppController : IAsyncDisposable
     public IReadOnlyList<PairedDeviceInfo> PairedDevices => _devices.List();
 
     public bool RevokeDevice(string deviceId) => _devices.Revoke(deviceId);
+
+    public async Task<bool> ConfigureFirewallAsync()
+    {
+        if (!IsSharingRunning || _actualPort <= 0)
+        {
+            FirewallStatus = new(
+                FirewallRuleState.Unavailable,
+                "Start sharing before configuring Windows Firewall.",
+                false);
+            StateChanged?.Invoke();
+            return false;
+        }
+
+        var executablePath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            FirewallStatus = new(
+                FirewallRuleState.Unavailable,
+                "The running ShadowPlay executable path could not be determined.",
+                false);
+            StateChanged?.Invoke();
+            return false;
+        }
+
+        FirewallStatus = await _firewall.EnsurePrivateRuleAsync(executablePath, _actualPort).ConfigureAwait(false);
+        _logger?.LogInformation(
+            "Firewall setup for {ExecutablePath} TCP {Port}: {State}. {Detail}",
+            executablePath,
+            _actualPort,
+            FirewallStatus.State,
+            FirewallStatus.Detail);
+        StateChanged?.Invoke();
+        return FirewallStatus.State == FirewallRuleState.Ready;
+    }
 
     public void OpenRecordingsFolderInExplorer()
     {
@@ -327,10 +394,9 @@ public sealed class AppController : IAsyncDisposable
 
     private static int? ResolvePort(WebApplication app)
     {
-        var addresses = app.Services.GetRequiredService<IServer>()
-            .Features.Get<IServerAddressesFeature>()?.Addresses;
+        var addresses = GetServerAddresses(app);
 
-        foreach (var address in addresses ?? [])
+        foreach (var address in addresses)
         {
             if (Uri.TryCreate(address, UriKind.Absolute, out var uri) && uri.Port > 0)
             {
@@ -340,6 +406,11 @@ public sealed class AppController : IAsyncDisposable
 
         return null;
     }
+
+    private static string[] GetServerAddresses(WebApplication app) =>
+        app.Services.GetRequiredService<IServer>()
+            .Features.Get<IServerAddressesFeature>()?.Addresses.ToArray()
+            ?? [];
 
     private static string DescribeStartError(Exception ex) =>
         ex is SocketException

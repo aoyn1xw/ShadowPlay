@@ -28,6 +28,8 @@ public sealed class MainViewModel : ObservableObject
     private Brush _statusBrush = Brushes.Gray;
     private string _addressText = "-";
     private bool _isRunning;
+    private string _firewallStatusText = "Firewall status has not been checked yet.";
+    private bool _firewallNeedsSetup;
     private string _pairingHint = "";
     private DispatcherTimer? _countdownTimer;
 
@@ -79,6 +81,12 @@ public sealed class MainViewModel : ObservableObject
 
     public ICommand ToggleSharingCommand => new RelayCommand(async () => await _controller.ToggleSharingAsync());
 
+    public ICommand ConfigureFirewallCommand => new RelayCommand(async () =>
+    {
+        await _controller.ConfigureFirewallAsync();
+        RefreshAll();
+    });
+
     public ICommand ChangeFolderCommand => new RelayCommand(_openSettings);
 
     public ICommand OpenFolderCommand => new RelayCommand(() => _controller.OpenRecordingsFolderInExplorer());
@@ -114,6 +122,9 @@ public sealed class MainViewModel : ObservableObject
             ? $"{LocalIpLocator.FindBestIpv4()?.ToString() ?? "localhost"}:{status.Port}"
             : "-";
 
+        FirewallStatusText = _controller.FirewallStatus.Detail;
+        FirewallNeedsSetup = IsRunning && _controller.FirewallStatus.NeedsSetup;
+
         if (IsRunning && QrImage is null)
         {
             var payload = _controller.BuildQrPayload(regenerate: false);
@@ -132,6 +143,18 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public string? RecordingsFolder => _controller.RecordingsFolder;
+
+    public string FirewallStatusText
+    {
+        get => _firewallStatusText;
+        private set => SetProperty(ref _firewallStatusText, value);
+    }
+
+    public bool FirewallNeedsSetup
+    {
+        get => _firewallNeedsSetup;
+        private set => SetProperty(ref _firewallNeedsSetup, value);
+    }
 
     private void ApplyQr(string? payload)
     {

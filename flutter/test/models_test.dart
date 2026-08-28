@@ -1,7 +1,14 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shadowplay/core/app_state.dart';
 import 'package:shadowplay/core/models.dart';
+import 'package:shadowplay/core/shadowplay_api.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -87,5 +94,133 @@ void main() {
 
     expect(state.newClips, isEmpty);
     expect(state.newClipCount, 0);
+  });
+
+  test('pairing performs a health preflight before consuming the code',
+      () async {
+    final paths = <String>[];
+    final client = MockClient((request) async {
+      paths.add(request.url.path);
+      if (request.url.path.endsWith('/health')) {
+        return http.Response(jsonEncode({'status': 'ok'}), 200);
+      }
+      return http.Response(
+        jsonEncode({
+          'token': 'token',
+          'deviceId': 'device',
+          'server': {
+            'serverId': 'server',
+            'computerName': 'PC',
+            'protocolVersion': 1,
+            'clipCount': 0,
+          },
+        }),
+        200,
+      );
+    });
+
+    await ShadowPlayApi.pair(
+      address: '192.168.0.201',
+      port: 5047,
+      code: 'ABCD-1234',
+      deviceName: 'iPhone',
+      client: client,
+    );
+
+    expect(paths, [
+      '/api/v1/health',
+      '/api/v1/pair/exchange',
+    ]);
+  });
+
+  test('pairing reports a refused connection distinctly', () async {
+    final client = MockClient((_) async {
+      throw SocketException(
+        'Connection refused',
+        osError: OSError('Connection refused', 111),
+      );
+    });
+
+    await expectLater(
+      ShadowPlayApi.pair(
+        address: '192.168.0.201',
+        port: 5047,
+        code: 'ABCD-1234',
+        deviceName: 'iPhone',
+        client: client,
+      ),
+      throwsA(
+        isA<ApiException>().having(
+          (error) => error.kind,
+          'kind',
+          ApiFailureKind.connectionRefused,
+        ),
+      ),
+    );
+  });
+
+  test('pairing reports a private-network HTTP rejection distinctly', () async {
+    final client = MockClient((_) async {
+      return http.Response(jsonEncode({'error': 'forbidden'}), 403);
+    });
+
+    await expectLater(
+      ShadowPlayApi.pair(
+        address: '192.168.0.201',
+        port: 5047,
+        code: 'ABCD-1234',
+        deviceName: 'iPhone',
+        client: client,
+      ),
+      throwsA(
+        isA<ApiException>()
+            .having((error) => error.kind, 'kind', ApiFailureKind.http)
+            .having((error) => error.statusCode, 'status', 403),
+      ),
+    );
+  });
+
+  test('pairing reports malformed health JSON distinctly', () async {
+    final client = MockClient((_) async => http.Response('{bad json', 200));
+
+    await expectLater(
+      ShadowPlayApi.pair(
+        address: '192.168.0.201',
+        port: 5047,
+        code: 'ABCD-1234',
+        deviceName: 'iPhone',
+        client: client,
+      ),
+      throwsA(
+        isA<ApiException>().having(
+          (error) => error.kind,
+          'kind',
+          ApiFailureKind.malformedResponse,
+        ),
+      ),
+    );
+  });
+
+  test('pairing reports timeout distinctly', () async {
+    final client = MockClient((_) async {
+      throw TimeoutException('test timeout');
+    });
+
+    await expectLater(
+      ShadowPlayApi.pair(
+        address: '192.168.0.201',
+        port: 5047,
+        code: 'ABCD-1234',
+        deviceName: 'iPhone',
+        client: client,
+      ),
+      throwsA(
+        isA<ApiException>().having(
+          (error) => error.kind,
+          'kind',
+          ApiFailureKind.timeout,
+        ),
+      ),
+    );
   });
 }

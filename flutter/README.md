@@ -3,6 +3,9 @@
 This is the cross-platform replacement for the reference client in `../ios/`.
 It implements protocol v1 pairing, QR/manual pairing, secure token storage,
 clip polling, persistent Documents-directory downloads, and local playback.
+Pairing performs a `GET /api/v1/health` preflight before consuming the one-time
+code and reports timeout, refused, unreachable, HTTP, and malformed-response
+failures separately.
 
 The UI uses a Material 3 onboarding flow and a persistent Home / Clips /
 Settings navigation shell. Home is the offline library; Clips lists new files

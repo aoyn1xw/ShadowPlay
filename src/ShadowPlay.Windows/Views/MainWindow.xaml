@@ -7,6 +7,9 @@
         MinWidth="620"
         MinHeight="520"
         WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+    </Window.Resources>
     <Grid Margin="16">
 
         <Grid.RowDefinitions>
@@ -64,6 +67,20 @@
                             Padding="10,4"
                             Margin="8,0,0,0" />
                 </WrapPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <TextBlock Text="{Binding FirewallStatusText}"
+                               TextWrapping="Wrap"
+                               MaxWidth="380"
+                               FontSize="11"
+                               Foreground="#777777"
+                               VerticalAlignment="Center" />
+                    <Button Content="Allow private LAN access"
+                            Command="{Binding ConfigureFirewallCommand}"
+                            Visibility="{Binding FirewallNeedsSetup, Converter={StaticResource BooleanToVisibilityConverter}}"
+                            Padding="8,3"
+                            Margin="8,0,0,0" />
+                </StackPanel>
             </StackPanel>
 
             <!-- QR panel -->

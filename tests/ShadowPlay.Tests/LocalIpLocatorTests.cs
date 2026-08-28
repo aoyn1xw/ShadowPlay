@@ -42,6 +42,20 @@ public class LocalIpLocatorTests
     }
 
     [Fact]
+    public void Preferred_endpoint_favors_gateway_backed_interface()
+    {
+        var chosen = LocalIpLocator.SelectPreferredEndpoint(
+        [
+            new LanEndpoint("Virtual adapter", IPAddress.Parse("192.168.56.1"), false),
+            new LanEndpoint("Wi-Fi", IPAddress.Parse("192.168.0.201"), true),
+        ]);
+
+        Assert.NotNull(chosen);
+        Assert.Equal("Wi-Fi", chosen.InterfaceName);
+        Assert.Equal(IPAddress.Parse("192.168.0.201"), chosen.Address);
+    }
+
+    [Fact]
     public void Public_addresses_are_never_selected()
     {
         var chosen = LocalIpLocator.SelectPreferred([IPAddress.Parse("8.8.8.8")]);

@@ -199,8 +199,12 @@ This MVP runs **plain HTTP on your LAN**:
 - ✅ Access is restricted to loopback/private addresses (RFC1918 + link-local); internet-
   routable clients get `403`.
 - ⚠️ The pairing QR contains everything a phone needs; treat it like a password while visible.
-- The app makes **no firewall changes** itself; Windows may ask you to allow listening on
-  private networks on first run — allow it for the app only.
+- The app checks for a **narrow inbound TCP rule** for the running executable and configured
+  port. From the main window, **Allow private LAN access** can create/update that rule after
+  an administrator confirmation. The rule is limited to the Private profile; ShadowPlay
+  never disables Windows Firewall or opens the Public profile. Mark the active Wi-Fi network
+  Private in Windows before pairing. A firewall rule for an older copy of `ShadowPlay.exe`
+  does not authorize a new install path.
 
 Planned hardening (architecture already supports it): pinned self-signed HTTPS between the
 desktop app and the phone, replacing the plain transport in `LanApiFactory`.
