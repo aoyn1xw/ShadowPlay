@@ -280,3 +280,11 @@ open ShadowPlay.xcodeproj
 
 The CI-produced IPA is **unsigned**: sideload it with AltStore/Sideloadly or open the
 project in Xcode and sign with your own Apple ID for device installs.
+
+## Cross-platform mobile client
+
+The Flutter client lives in [`flutter/`](flutter/README.md). It is the
+cross-platform implementation of the iOS reference client: pair over LAN,
+browse clips, download recordings, and play the local copies offline. The
+original SwiftUI client in `ios/` remains available as a protocol/reference
+implementation.
