@@ -162,9 +162,15 @@ jobs:
             -k "$KEYCHAIN_PASSWORD" \
             "$KEYCHAIN_PATH"
 
+          EXISTING_KEYCHAINS="$(
+            security list-keychains -d user \
+              | tr -d '"' \
+              | tr '\n' ' '
+          )"
+
           security list-keychains \
             -d user \
-            -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+            -s "$KEYCHAIN_PATH" $EXISTING_KEYCHAINS
 
           security default-keychain \
             -d user \
@@ -178,7 +184,10 @@ jobs:
             "$KEYCHAIN_PATH"
 
           CERT_SHA="$(
-            security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            security find-identity \
+              -v \
+              -p codesigning \
+              "$KEYCHAIN_PATH" \
             | grep '"Apple Distribution:' \
             | head -n 1 \
             | awk '{print $2}'
@@ -320,12 +329,77 @@ jobs:
             --release \
             --no-codesign
 
+      - name: Configure Runner signing
+        working-directory: flutter/ios
+        run: |
+          set -euo pipefail
+
+          export PROFILE_NAME
+          export TEAM_ID
+          export BUNDLE_ID
+          export CERT_SHA
+          export KEYCHAIN_PATH
+
+          ruby <<'RUBY'
+          require "xcodeproj"
+
+          project = Xcodeproj::Project.open("Runner.xcodeproj")
+
+          runner = project.targets.find do |target|
+            target.name == "Runner"
+          end
+
+          abort "Runner target not found" unless runner
+
+          release = runner.build_configurations.find do |config|
+            config.name == "Release"
+          end
+
+          abort "Runner Release configuration not found" unless release
+
+          settings = release.build_settings
+
+          settings["CODE_SIGN_STYLE"] = "Manual"
+          settings["CODE_SIGN_IDENTITY"] = ENV.fetch("CERT_SHA")
+          settings["DEVELOPMENT_TEAM"] = ENV.fetch("TEAM_ID")
+          settings["PRODUCT_BUNDLE_IDENTIFIER"] = ENV.fetch("BUNDLE_ID")
+          settings["PROVISIONING_PROFILE_SPECIFIER"] = ENV.fetch("PROFILE_NAME")
+          settings.delete("PROVISIONING_PROFILE")
+
+          project.save
+
+          puts "Configured signing for Runner Release only"
+          puts "Bundle ID: #{ENV.fetch("BUNDLE_ID")}"
+          puts "Team ID: #{ENV.fetch("TEAM_ID")}"
+          puts "Profile: #{ENV.fetch("PROFILE_NAME")}"
+          RUBY
+
+      - name: Inspect signing settings
+        working-directory: flutter/ios
+        run: |
+          set -euo pipefail
+
+          xcodebuild \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -showBuildSettings \
+            | grep -E \
+              "PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER"
+
       - name: Archive signed iOS app
         working-directory: flutter/ios
         run: |
           set -euo pipefail
 
           rm -rf "$ARCHIVE_PATH"
+
+          security unlock-keychain \
+            -p "" \
+            "$KEYCHAIN_PATH" \
+            2>/dev/null || true
 
           xcodebuild \
             -workspace Runner.xcworkspace \
@@ -334,14 +408,7 @@ jobs:
             -sdk iphoneos \
             -destination "generic/platform=iOS" \
             -archivePath "$ARCHIVE_PATH" \
-            archive \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="$CERT_SHA" \
-            DEVELOPMENT_TEAM="$TEAM_ID" \
-            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
-            PROVISIONING_PROFILE="$PROFILE_UUID" \
-            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
-            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH"
+            archive
 
       - name: Verify signed archive
         run: |
@@ -379,7 +446,14 @@ jobs:
               "$RUNNER_TEMP/embedded-profile.plist"
           )"
 
+          EMBEDDED_APP_ID="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :Entitlements:application-identifier" \
+              "$RUNNER_TEMP/embedded-profile.plist"
+          )"
+
           echo "Embedded profile UUID: $EMBEDDED_UUID"
+          echo "Embedded application identifier: $EMBEDDED_APP_ID"
 
           if [ "$EMBEDDED_UUID" != "$PROFILE_UUID" ]; then
             echo "::error::Wrong provisioning profile was embedded"
@@ -457,26 +531,25 @@ jobs:
 
           mkdir -p docs
 
-          APP_VERSION="$(
+          VERSION_LINE="$(
             grep '^version:' flutter/pubspec.yaml \
             | head -n 1 \
-            | awk '{print $2}' \
-            | cut -d '+' -f 1
+            | awk '{print $2}'
           )"
 
-          BUILD_NUMBER="$(
-            grep '^version:' flutter/pubspec.yaml \
-            | head -n 1 \
-            | awk '{print $2}' \
-            | awk -F '+' '{print $2}'
-          )"
+          APP_VERSION="${VERSION_LINE%%+*}"
+
+          if [[ "$VERSION_LINE" == *"+"* ]]; then
+            BUILD_NUMBER="${VERSION_LINE##*+}"
+          else
+            BUILD_NUMBER="1"
+          fi
 
           if [ -z "$APP_VERSION" ]; then
             APP_VERSION="1.0.0"
           fi
 
-          if [ -z "$BUILD_NUMBER" ] || \
-             [ "$BUILD_NUMBER" = "$APP_VERSION" ]; then
+          if [ -z "$BUILD_NUMBER" ]; then
             BUILD_NUMBER="1"
           fi
 
@@ -521,8 +594,8 @@ jobs:
 
           plutil -lint docs/manifest.plist
 
-          echo "OTA app version: $APP_VERSION"
-          echo "OTA build number: $BUILD_NUMBER"
+          echo "Version: $APP_VERSION"
+          echo "Build number: $BUILD_NUMBER"
 
       - name: Publish updated OTA manifest
         run: |
@@ -543,7 +616,36 @@ jobs:
 
           git push
 
-      - name: Verify OTA URLs
+      - name: Verify OTA endpoints
+        run: |
+          set -euo pipefail
+
+          sleep 5
+
+          IPA_URL="https://github.com/aoyn1xw/ShadowPlay/releases/download/latest/ShadowPlay.ipa"
+          MANIFEST_URL="https://aoyn1xw.github.io/ShadowPlay/manifest.plist"
+
+          echo "Checking IPA..."
+          curl \
+            --fail \
+            --location \
+            --silent \
+            --show-error \
+            --head \
+            "$IPA_URL"
+
+          echo "Checking manifest..."
+          curl \
+            --fail \
+            --location \
+            --silent \
+            --show-error \
+            "$MANIFEST_URL" \
+            >/dev/null
+
+          echo "OTA endpoints available"
+
+      - name: Print install information
         run: |
           echo "Install page:"
           echo "https://aoyn1xw.github.io/ShadowPlay/"
@@ -551,7 +653,7 @@ jobs:
           echo "Manifest:"
           echo "https://aoyn1xw.github.io/ShadowPlay/manifest.plist"
 
-          echo "IPA:"
+          echo "Signed IPA:"
           echo "https://github.com/aoyn1xw/ShadowPlay/releases/download/latest/ShadowPlay.ipa"
 
       - name: Clean up signing files
