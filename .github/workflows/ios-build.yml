@@ -55,8 +55,8 @@ jobs:
           PP_PATH=$RUNNER_TEMP/profile.mobileprovision
 
           # Robust decode using python3 to avoid shell whitespace and BSD/GNU base64 syntax issues
-          python3 -c "import base64, os; open(os.environ['CERTIFICATE_PATH'], 'wb').write(base64.b64decode(os.environ['P12_BASE64'].strip()))"
-          python3 -c "import base64, os; open(os.environ['PP_PATH'], 'wb').write(base64.b64decode(os.environ['PROVISION_BASE64'].strip()))"
+          CERTIFICATE_PATH="$CERTIFICATE_PATH" P12_BASE64="$P12_BASE64" python3 -c "import base64, os; open(os.environ['CERTIFICATE_PATH'], 'wb').write(base64.b64decode(os.environ['P12_BASE64'].strip()))"
+          PP_PATH="$PP_PATH" PROVISION_BASE64="$PROVISION_BASE64" python3 -c "import base64, os; open(os.environ['PP_PATH'], 'wb').write(base64.b64decode(os.environ['PROVISION_BASE64'].strip()))"
 
           # Verify files exist and have non-zero size
           if [ ! -s "$CERTIFICATE_PATH" ] || [ ! -s "$PP_PATH" ]; then
