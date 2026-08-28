@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -148,7 +149,7 @@ class _PermissionPage extends StatelessWidget {
             ),
             const SizedBox(height: 28),
             Text(
-              'Allow Camera',
+              'Before You Pair',
               style: Theme.of(context)
                   .textTheme
                   .headlineSmall
@@ -156,7 +157,7 @@ class _PermissionPage extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'Camera access is only used to scan the one-time pairing QR code shown on your PC. You can also pair manually.',
+              'You may see two permission prompts. Camera access is only used to scan the one-time QR code. Local Network access lets ShadowPlay reach your PC on the same Wi-Fi. Manual pairing does not need the camera.',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -194,6 +195,8 @@ class _PairingPageState extends State<_PairingPage> {
   PairingPayload? _payload;
   bool _scanning = false;
   bool _busy = false;
+  bool _preflightBusy = false;
+  bool _preflightPassed = false;
   String? _error;
 
   @override
@@ -227,11 +230,13 @@ class _PairingPageState extends State<_PairingPage> {
         setState(() {
           _payload = payload;
           _scanning = false;
+          _preflightPassed = false;
           _address.text = payload.address;
           _port.text = payload.port.toString();
           _code.text = payload.code;
           _error = null;
         });
+        unawaited(_runPreflight());
       } catch (_) {
         setState(
             () => _error = 'That is not a valid ShadowPlay pairing QR code.');
@@ -300,6 +305,7 @@ class _PairingPageState extends State<_PairingPage> {
               setState(() {
                 _mode = value.first;
                 _scanning = false;
+                _preflightPassed = false;
                 _error = null;
               });
             },
@@ -327,6 +333,9 @@ class _PairingPageState extends State<_PairingPage> {
           ],
           const SizedBox(height: 20),
           if (_payload != null || _mode == _PairMode.manual)
+            _preflightAction(),
+          if ((_payload != null || _mode == _PairMode.manual) &&
+              _preflightPassed)
             FilledButton(
               onPressed: _busy ? null : _pair,
               child: Text(_busy ? 'Pairing…' : 'Pair Device'),
@@ -353,7 +362,11 @@ class _PairingPageState extends State<_PairingPage> {
             Text('${_payload!.address}:${_payload!.port}'),
             const SizedBox(height: 12),
             TextButton.icon(
-              onPressed: () => setState(() => _payload = null),
+              onPressed: () => setState(() {
+                _payload = null;
+                _preflightPassed = false;
+                _error = null;
+              }),
               icon: const Icon(Icons.qr_code_scanner),
               label: const Text('Scan again'),
             ),
@@ -438,6 +451,57 @@ class _PairingPageState extends State<_PairingPage> {
           ),
         ],
       );
+
+  Widget _preflightAction() {
+    final label = _preflightBusy
+        ? 'Checking PC connection…'
+        : _preflightPassed
+            ? 'PC reachable on this Wi‑Fi'
+            : _mode == _PairMode.qr
+                ? 'Check PC connection again'
+                : 'Check PC connection';
+    return Column(
+      children: [
+        OutlinedButton.icon(
+          onPressed: _preflightBusy ? null : _runPreflight,
+          icon: Icon(_preflightPassed ? Icons.check : Icons.wifi_find),
+          label: Text(label),
+        ),
+        if (!_preflightPassed)
+          const Padding(
+            padding: EdgeInsets.only(top: 6),
+            child: Text(
+              'We check the PC before using the one-time pairing code.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _runPreflight() async {
+    final port = int.tryParse(_port.text);
+    if (_address.text.trim().isEmpty || port == null || port < 1 || port > 65535) {
+      if (mounted) {
+        setState(() => _error = 'Enter the PC address and port first.');
+      }
+      return;
+    }
+
+    setState(() {
+      _preflightBusy = true;
+      _preflightPassed = false;
+      _error = null;
+    });
+    try {
+      await ShadowPlayApi.health(address: _address.text.trim(), port: port);
+      if (mounted) setState(() => _preflightPassed = true);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _preflightBusy = false);
+    }
+  }
 }
 
 class _ScannerError extends StatelessWidget {

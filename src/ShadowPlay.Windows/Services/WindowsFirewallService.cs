@@ -63,8 +63,10 @@ public sealed class WindowsFirewallService(ILogger<WindowsFirewallService>? logg
             dynamic policy = Activator.CreateInstance(policyType)!;
             try
             {
-                var profileTypes = Convert.ToInt32(policy.CurrentProfileTypes, CultureInfo.InvariantCulture);
-                var privateActive = (profileTypes & PrivateProfile) != 0;
+                // CurrentProfileTypes is a bitmask across every connected adapter.
+                // A disconnected Private VPN/Tailscale adapter must not make a
+                // Public Wi-Fi profile look safe for a Private-only rule.
+                var privateActive = IsActivePrivateNetworkProfile();
                 var expectedPath = NormalizePath(executablePath);
                 var foundNamedRule = false;
                 var matchingRule = false;
@@ -178,6 +180,48 @@ public sealed class WindowsFirewallService(ILogger<WindowsFirewallService>? logg
             + $"netsh advfirewall firewall add rule name='{RuleName}' dir=in action=allow "
             + $"protocol=TCP localport={safePort} profile=private program='{safePath}' enable=yes | Out-Null; "
             + "exit $LASTEXITCODE";
+    }
+
+    private bool IsActivePrivateNetworkProfile()
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = "-NoProfile -NonInteractive -Command \"@("
+                    + "Get-NetConnectionProfile | Where-Object { "
+                    + "$_.NetworkCategory -eq 'Private' -and "
+                    + "$_.IPv4Connectivity -ne 'NoTraffic' "
+                    + "}).Count -gt 0\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                CreateNoWindow = true,
+            });
+
+            if (process is null || !process.WaitForExit(3000))
+            {
+                try
+                {
+                    process?.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // Best-effort timeout cleanup; the status remains unavailable.
+                }
+
+                return false;
+            }
+
+            var output = process.StandardOutput.ReadToEnd().Trim();
+            return process.ExitCode == 0
+                && output.Equals("True", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            logger?.LogWarning(ex, "Unable to inspect the active Windows network profile");
+            return false;
+        }
     }
 
     private static bool Matches(dynamic rule, string expectedPath, int port)
