@@ -237,11 +237,24 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> downloadClips(Iterable<Clip> clips) async {
-    for (final clip in clips) {
-      if (downloadedIds.contains(clip.id)) continue;
-      await _downloadClip(clip);
+  Future<void> downloadClips(Iterable<Clip> clips, {int maxConcurrent = 2}) async {
+    final pending =
+        clips.where((clip) => !downloadedIds.contains(clip.id)).toList();
+    if (pending.isEmpty) return;
+
+    var index = 0;
+    Future<void> worker() async {
+      while (true) {
+        if (index >= pending.length) break;
+        final clip = pending[index++];
+        await _downloadClip(clip);
+      }
     }
+
+    final workerCount =
+        pending.length < maxConcurrent ? pending.length : maxConcurrent;
+    final workers = List.generate(workerCount, (_) => worker());
+    await Future.wait(workers);
   }
 
   Future<void> _downloadClip(Clip clip) async {

@@ -1,19 +1,18 @@
 # ShadowPlay (working title)
 
 A lightweight Windows tray application that watches your NVIDIA App / GeForce Experience
-recordings folder and serves completed `.mp4` clips to a phone over the local Wi-Fi network.
-A future iOS app will pair with this desktop app by scanning a QR code and download original,
+recordings folder and serves completed `.mp4` clips to your phone over the local Wi-Fi network.
+A cross-platform Flutter mobile app (Android & iOS) pairs with this desktop app by scanning a QR code and downloads original,
 byte-for-byte recordings.
 
 > This is an unofficial hobby project and is not affiliated with, endorsed by, or connected
 > to NVIDIA Corporation. "ShadowPlay" is a temporary working title. No NVIDIA assets are used.
 >
-> **Status:** Windows desktop app (MVP) implemented, plus a minimal SwiftUI iOS client
-> under `ios/`. See **[docs/IOS_HANDOFF.md](docs/IOS_HANDOFF.md)** for the full contract.
+> **Status:** Windows desktop app (MVP) implemented, plus a cross-platform Flutter mobile client
+> under [`flutter/`](flutter/README.md).
 >
-> **CI:** every push/PR builds both artifacts on GitHub Actions —
-> Windows exe (`ShadowPlay-win-x64`) and unsigned iOS IPA (`ShadowPlay-ios-unsigned-ipa`)
-> via a macOS runner.
+> **CI:** every push/PR builds artifacts on GitHub Actions —
+> Windows exe (`ShadowPlay-win-x64`), Android debug APK (`ShadowPlay-Flutter-android-debug`), and unsigned iOS IPA (`ShadowPlay-Flutter-ios-unsigned`).
 
 ---
 
@@ -253,38 +252,16 @@ tests/
                         reconciliation, stable ids, traversal, pairing expiry/single-use,
                         token validation/revocation, API auth/listing/range downloads,
                         graceful shutdown)
-ios/
-  project.yml           XcodeGen spec (the .xcodeproj is generated, not committed)
-  ShadowPlay/           Minimal SwiftUI client: QR pairing (+ manual entry), clip list,
-                        AVPlayer streaming with token headers, chunked downloads
+flutter/
+  lib/                  Cross-platform mobile client (Home, Clips, Player, Settings, Onboarding)
+  test/                 Unit and widget test suites
 .github/workflows/
-  build.yml             Builds Windows exe + unsigned iOS IPA on push/PR
+  build.yml             Builds Windows exe, Android debug APK, and unsigned iOS IPA on push/PR
 ```
-
-## Building the iOS app locally
-
-Requires a Mac with Xcode 15+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen):
-
-```bash
-cd ios
-xcodegen generate          # creates ShadowPlay.xcodeproj (git-ignored)
-open ShadowPlay.xcodeproj
-# Run on the Simulator: manual pairing mode works there (no camera needed)
-```
-
-> CI pins XcodeGen (for deterministic output) **and** normalizes the generated
-> `objectVersion` to 56 afterwards, so the project always opens in both Xcode 15 and 16.
-> Locally, any recent XcodeGen works — if your generated project shows a
-> "future Xcode project file format" warning, it's cosmetic and safe to open with
-> a current Xcode.
-
-The CI-produced IPA is **unsigned**: sideload it with AltStore/Sideloadly or open the
-project in Xcode and sign with your own Apple ID for device installs.
 
 ## Cross-platform mobile client
 
 The Flutter client lives in [`flutter/`](flutter/README.md). It is the
-cross-platform implementation of the iOS reference client: pair over LAN,
-browse clips, download recordings, and play the local copies offline. The
-original SwiftUI client in `ios/` remains available as a protocol/reference
-implementation.
+cross-platform mobile client for Android and iOS: pair over LAN via QR or manual entry,
+browse available clips, download recordings with parallel transfers, and play the local copies offline.
+

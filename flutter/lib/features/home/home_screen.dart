@@ -156,6 +156,7 @@ class _LocalVideoPreviewState extends State<_LocalVideoPreview> {
     try {
       await controller.initialize();
       await controller.setVolume(0);
+      await controller.pause();
       if (!mounted) {
         await controller.dispose();
         return;
@@ -164,6 +165,17 @@ class _LocalVideoPreviewState extends State<_LocalVideoPreview> {
     } catch (error) {
       await controller.dispose();
       if (mounted) setState(() => _error = error);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _LocalVideoPreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.path != widget.path) {
+      _controller?.dispose();
+      _controller = null;
+      _error = null;
+      _initialize();
     }
   }
 
