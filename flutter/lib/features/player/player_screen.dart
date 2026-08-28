@@ -111,6 +111,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       child: Row(
                         children: [
                           IconButton.filledTonal(
+                            tooltip:
+                                _controller.value.isPlaying ? 'Pause' : 'Play',
                             onPressed: () => _controller.value.isPlaying
                                 ? _controller.pause()
                                 : _controller.play(),
