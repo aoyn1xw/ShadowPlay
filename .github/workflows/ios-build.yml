@@ -1,21 +1,24 @@
-name: iOS Build & OTA Release
+name: iOS Signed Build
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
-  workflow_dispatch:
+    paths:
+      - "flutter/**"
+      - ".github/workflows/ios-build.yml"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ios-signed-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-and-release-ios:
-    name: Build & Release iOS (.ipa)
+  build-ios:
+    name: Build signed iOS IPA
     runs-on: macos-15
 
     steps:
@@ -27,12 +30,6 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -40,46 +37,130 @@ jobs:
           flutter-version: 3.47.2
           cache: true
 
-      - name: Install Apple Certificate and Provisioning Profile
+      - name: Install signing files
         env:
           P12_BASE64: ${{ secrets.P12_BASE64 }}
           P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
           PROVISION_BASE64: ${{ secrets.PROVISION_BASE64 }}
         run: |
-          if [ -z "$P12_BASE64" ] || [ -z "$PROVISION_BASE64" ]; then
-            echo "::error::Missing required signing secrets."
+          set -euo pipefail
+
+          if [ -z "${P12_BASE64:-}" ]; then
+            echo "::error::P12_BASE64 is missing"
             exit 1
           fi
 
-          export KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain"
-          export KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
-          export CERTIFICATE_PATH="$RUNNER_TEMP/certificate.p12"
-          export PP_PATH="$RUNNER_TEMP/profile.mobileprovision"
-          export PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
+          if [ -z "${P12_PASSWORD:-}" ]; then
+            echo "::error::P12_PASSWORD is missing"
+            exit 1
+          fi
 
-          python3 -c "import base64, os; open(os.environ['CERTIFICATE_PATH'], 'wb').write(base64.b64decode(os.environ['P12_BASE64'].strip()))"
-          python3 -c "import base64, os; open(os.environ['PP_PATH'], 'wb').write(base64.b64decode(os.environ['PROVISION_BASE64'].strip()))"
+          if [ -z "${PROVISION_BASE64:-}" ]; then
+            echo "::error::PROVISION_BASE64 is missing"
+            exit 1
+          fi
+
+          CERTIFICATE_PATH="$RUNNER_TEMP/original.p12"
+          NORMALIZED_P12="$RUNNER_TEMP/signing.p12"
+          CERTIFICATE_PEM="$RUNNER_TEMP/signing.pem"
+          PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
+          PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          EXPORT_OPTIONS="$RUNNER_TEMP/ExportOptions.plist"
+
+          export CERTIFICATE_PATH
+          export PROFILE_PATH
+          export P12_BASE64
+          export PROVISION_BASE64
+
+          python3 <<'PY'
+          import base64
+          import os
+
+          p12 = base64.b64decode(os.environ["P12_BASE64"].strip())
+          profile = base64.b64decode(os.environ["PROVISION_BASE64"].strip())
+
+          with open(os.environ["CERTIFICATE_PATH"], "wb") as f:
+              f.write(p12)
+
+          with open(os.environ["PROFILE_PATH"], "wb") as f:
+              f.write(profile)
+          PY
+
+          echo "Decoded P12 size:"
+          wc -c "$CERTIFICATE_PATH"
+
+          echo "Decoded provisioning profile size:"
+          wc -c "$PROFILE_PATH"
 
           if [ ! -s "$CERTIFICATE_PATH" ]; then
-            echo "::error::Decoded certificate is empty."
+            echo "::error::Decoded P12 is empty"
             exit 1
           fi
 
-          if [ ! -s "$PP_PATH" ]; then
-            echo "::error::Decoded provisioning profile is empty."
+          if [ ! -s "$PROFILE_PATH" ]; then
+            echo "::error::Decoded provisioning profile is empty"
             exit 1
           fi
 
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "Checking PKCS12..."
 
-          security import "$CERTIFICATE_PATH" \
-            -P "${P12_PASSWORD:-}" \
-            -A \
-            -t cert \
-            -f pkcs12 \
-            -k "$KEYCHAIN_PATH"
+          if openssl pkcs12 \
+            -in "$CERTIFICATE_PATH" \
+            -passin "pass:$P12_PASSWORD" \
+            -info \
+            -noout
+          then
+            PKCS12_LEGACY=""
+          else
+            echo "Normal PKCS12 parsing failed, trying legacy mode..."
+
+            openssl pkcs12 \
+              -legacy \
+              -in "$CERTIFICATE_PATH" \
+              -passin "pass:$P12_PASSWORD" \
+              -info \
+              -noout
+
+            PKCS12_LEGACY="-legacy"
+          fi
+
+          echo "Extracting and normalizing certificate..."
+
+          openssl pkcs12 \
+            $PKCS12_LEGACY \
+            -in "$CERTIFICATE_PATH" \
+            -passin "pass:$P12_PASSWORD" \
+            -nodes \
+            -out "$CERTIFICATE_PEM"
+
+          openssl pkcs12 \
+            -export \
+            -in "$CERTIFICATE_PEM" \
+            -out "$NORMALIZED_P12" \
+            -passout "pass:$P12_PASSWORD"
+
+          echo "Creating temporary keychain..."
+
+          security create-keychain \
+            -p "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          security set-keychain-settings \
+            -lut 21600 \
+            "$KEYCHAIN_PATH"
+
+          security unlock-keychain \
+            -p "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          echo "Importing signing identity..."
+
+          security import "$NORMALIZED_P12" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$P12_PASSWORD" \
+            -A
 
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
@@ -91,25 +172,121 @@ jobs:
             -d user \
             -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
 
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          security default-keychain \
+            -d user \
+            -s "$KEYCHAIN_PATH"
 
-          security cms -D -i "$PP_PATH" > "$PROFILE_PLIST"
+          echo "Available signing identities:"
+          security find-identity \
+            -v \
+            -p codesigning \
+            "$KEYCHAIN_PATH"
 
-          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" "$PROFILE_PLIST")
+          IDENTITY_COUNT="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -c '"Apple Distribution:' || true)"
 
-          if [ -z "$PROFILE_UUID" ]; then
-            echo "::error::Could not determine provisioning profile UUID."
+          if [ "$IDENTITY_COUNT" -lt 1 ]; then
+            echo "::error::No Apple Distribution signing identity was imported"
             exit 1
           fi
 
-          echo "Installing provisioning profile: $PROFILE_UUID"
+          echo "Decoding provisioning profile..."
 
-          cp "$PP_PATH" \
+          security cms \
+            -D \
+            -i "$PROFILE_PATH" \
+            > "$PROFILE_PLIST"
+
+          PROFILE_UUID="$(/usr/libexec/PlistBuddy -c "Print :UUID" "$PROFILE_PLIST")"
+          PROFILE_NAME="$(/usr/libexec/PlistBuddy -c "Print :Name" "$PROFILE_PLIST")"
+          TEAM_ID="$(/usr/libexec/PlistBuddy -c "Print :TeamIdentifier:0" "$PROFILE_PLIST")"
+          APPLICATION_IDENTIFIER="$(/usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" "$PROFILE_PLIST")"
+
+          BUNDLE_ID="${APPLICATION_IDENTIFIER#${TEAM_ID}.}"
+
+          echo "Profile UUID: $PROFILE_UUID"
+          echo "Profile name: $PROFILE_NAME"
+          echo "Team ID: $TEAM_ID"
+          echo "Bundle ID: $BUNDLE_ID"
+
+          if [ -z "$PROFILE_UUID" ] || \
+             [ -z "$PROFILE_NAME" ] || \
+             [ -z "$TEAM_ID" ] || \
+             [ -z "$BUNDLE_ID" ]; then
+            echo "::error::Could not read required provisioning profile information"
+            exit 1
+          fi
+
+          GET_TASK_ALLOW="$(/usr/libexec/PlistBuddy -c "Print :Entitlements:get-task-allow" "$PROFILE_PLIST" 2>/dev/null || echo false)"
+          PROVISIONS_ALL_DEVICES="$(/usr/libexec/PlistBuddy -c "Print :ProvisionsAllDevices" "$PROFILE_PLIST" 2>/dev/null || echo false)"
+
+          if [ "$PROVISIONS_ALL_DEVICES" = "true" ]; then
+            EXPORT_METHOD="enterprise"
+          elif [ "$GET_TASK_ALLOW" = "true" ]; then
+            EXPORT_METHOD="development"
+          elif /usr/libexec/PlistBuddy -c "Print :ProvisionedDevices:0" "$PROFILE_PLIST" >/dev/null 2>&1; then
+            EXPORT_METHOD="ad-hoc"
+          else
+            EXPORT_METHOD="app-store-connect"
+          fi
+
+          echo "Export method: $EXPORT_METHOD"
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+
+          cp "$PROFILE_PATH" \
             "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
 
-          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+          cat > "$EXPORT_OPTIONS" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>$EXPORT_METHOD</string>
 
-      - name: Precache iOS artifacts
+              <key>teamID</key>
+              <string>$TEAM_ID</string>
+
+              <key>signingStyle</key>
+              <string>manual</string>
+
+              <key>signingCertificate</key>
+              <string>Apple Distribution</string>
+
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>$BUNDLE_ID</key>
+                  <string>$PROFILE_NAME</string>
+              </dict>
+
+              <key>stripSwiftSymbols</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+
+          echo "EXPORT_OPTIONS=$EXPORT_OPTIONS" >> "$GITHUB_ENV"
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+          echo "TEAM_ID=$TEAM_ID" >> "$GITHUB_ENV"
+          echo "BUNDLE_ID=$BUNDLE_ID" >> "$GITHUB_ENV"
+          echo "EXPORT_METHOD=$EXPORT_METHOD" >> "$GITHUB_ENV"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+          rm -f "$CERTIFICATE_PEM"
+          rm -f "$CERTIFICATE_PATH"
+
+      - name: Show signing configuration
+        run: |
+          echo "Team: $TEAM_ID"
+          echo "Bundle: $BUNDLE_ID"
+          echo "Profile: $PROFILE_NAME"
+          echo "Profile UUID: $PROFILE_UUID"
+          echo "Export method: $EXPORT_METHOD"
+
+          plutil -lint "$EXPORT_OPTIONS"
+
+      - name: Precache iOS
         working-directory: flutter
         run: flutter precache --ios
 
@@ -125,47 +302,48 @@ jobs:
         working-directory: flutter
         run: flutter test
 
-      - name: Build signed iOS IPA
+      - name: Build signed IPA
         working-directory: flutter
         run: |
           flutter build ipa \
             --release \
-            --export-options-plist=ios/ExportOptions.plist
+            --export-options-plist="$EXPORT_OPTIONS"
 
-      - name: Stage IPA
+      - name: Find IPA
         run: |
-          mkdir -p output
+          set -euo pipefail
 
-          IPA_FILE=$(find flutter/build/ios/ipa -name "*.ipa" -type f | head -n 1)
+          IPA_FILE="$(find flutter/build/ios/ipa -type f -name "*.ipa" | head -n 1)"
 
           if [ -z "$IPA_FILE" ]; then
-            echo "::error::No IPA found."
-            find flutter/build/ios -maxdepth 4 -type f
+            echo "::error::No IPA was produced"
+            find flutter/build/ios -maxdepth 5 -type f || true
             exit 1
           fi
 
-          echo "Found IPA: $IPA_FILE"
+          mkdir -p output
+          cp "$IPA_FILE" output/ShadowPlay-signed.ipa
 
-          cp "$IPA_FILE" output/ShadowPlay.ipa
+          ls -lh output/ShadowPlay-signed.ipa
 
-          ls -lh output
-
-      - name: Publish latest iOS release
-        uses: softprops/action-gh-release@v2
+      - name: Upload signed IPA
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: latest
-          name: ShadowPlay iOS OTA Build
-          body: |
-            Automated iOS build from the latest main branch.
+          name: ShadowPlay-signed-iOS
+          path: output/ShadowPlay-signed.ipa
+          if-no-files-found: error
+          retention-days: 7
 
-            Install page:
-            https://aoyn1xw.github.io/ShadowPlay/
-          files: output/ShadowPlay.ipa
-          prerelease: false
-
-      - name: Clean up temporary keychain
+      - name: Clean up signing files
         if: always()
         run: |
-          if [ -f "$RUNNER_TEMP/build.keychain" ]; then
-            security delete-keychain "$RUNNER_TEMP/build.keychain" || true
+          if [ -n "${KEYCHAIN_PATH:-}" ] && [ -f "$KEYCHAIN_PATH" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
           fi
+
+          rm -f "$RUNNER_TEMP/original.p12"
+          rm -f "$RUNNER_TEMP/signing.p12"
+          rm -f "$RUNNER_TEMP/signing.pem"
+          rm -f "$RUNNER_TEMP/profile.mobileprovision"
+          rm -f "$RUNNER_TEMP/profile.plist"
+          rm -f "$RUNNER_TEMP/ExportOptions.plist"
