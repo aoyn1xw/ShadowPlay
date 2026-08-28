@@ -54,27 +54,37 @@ jobs:
           CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
           PP_PATH=$RUNNER_TEMP/profile.mobileprovision
 
-          # Decode certificates
-          echo "$P12_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
-          echo "$PROVISION_BASE64" | base64 --decode > "$PP_PATH"
+          # Robust decode using python3 to avoid shell whitespace and BSD/GNU base64 syntax issues
+          python3 -c "import base64, os; open(os.environ['CERTIFICATE_PATH'], 'wb').write(base64.b64decode(os.environ['P12_BASE64'].strip()))"
+          python3 -c "import base64, os; open(os.environ['PP_PATH'], 'wb').write(base64.b64decode(os.environ['PROVISION_BASE64'].strip()))"
+
+          # Verify files exist and have non-zero size
+          if [ ! -s "$CERTIFICATE_PATH" ] || [ ! -s "$PP_PATH" ]; then
+            echo "::error::Decoded certificate or provisioning profile is empty."
+            exit 1
+          fi
 
           # Create temporary keychain
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          # Import certificate into keychain
-          security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          # Import certificate into keychain (handling empty or set password)
+          if [ -n "$P12_PASSWORD" ]; then
+            security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          else
+            security import "$CERTIFICATE_PATH" -P "" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          fi
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
           # Set user keychains
           security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
 
-          # Install provisioning profile
+          # Install provisioning profile with its UUID
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          PROFILE_UUID=$(strings "$PP_PATH" | grep -A1 UUID | grep string | sed -e 's/.*<string>//' -e 's/<\/string>.*//')
+          PROFILE_UUID=$(strings "$PP_PATH" | grep -A1 UUID | grep string | sed -e 's/.*<string>//' -e 's/<\/string>.*//' | head -n 1)
           if [ -z "$PROFILE_UUID" ]; then
-            PROFILE_UUID="shadowplay_profile"
+            PROFILE_UUID="b62b75c1-a44f-4a2a-be0f-9a3868f95560"
           fi
           echo "Installing provisioning profile with UUID: $PROFILE_UUID"
           cp "$PP_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/$PROFILE_UUID.mobileprovision

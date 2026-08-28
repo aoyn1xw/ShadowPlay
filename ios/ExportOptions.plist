@@ -4,8 +4,15 @@
 <dict>
 	<key>method</key>
 	<string>development</string>
+	<key>teamID</key>
+	<string>9BV8S264N5</string>
 	<key>signingStyle</key>
 	<string>manual</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>app.winter6686.date9988</key>
+		<string>00008110-0008045C2250401EGN6I8PU</string>
+	</dict>
 	<key>compileBitcode</key>
 	<false/>
 	<key>thinning</key>
