@@ -1,137 +1,66 @@
-name: iOS Build & OTA Release
+- name: Install Apple Certificate and Provisioning Profile
+  env:
+    P12_BASE64: ${{ secrets.P12_BASE64 }}
+    P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+    PROVISION_BASE64: ${{ secrets.PROVISION_BASE64 }}
+  run: |
+    if [ -z "$P12_BASE64" ] || [ -z "$PROVISION_BASE64" ]; then
+      echo "::error::Missing required signing secrets (P12_BASE64 and/or PROVISION_BASE64)."
+      exit 1
+    fi
 
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+    export KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain"
+    export KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+    export CERTIFICATE_PATH="$RUNNER_TEMP/certificate.p12"
+    export PP_PATH="$RUNNER_TEMP/profile.mobileprovision"
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    python3 -c "import base64, os; open(os.environ['CERTIFICATE_PATH'], 'wb').write(base64.b64decode(os.environ['P12_BASE64'].strip()))"
+    python3 -c "import base64, os; open(os.environ['PP_PATH'], 'wb').write(base64.b64decode(os.environ['PROVISION_BASE64'].strip()))"
 
-permissions:
-  contents: write
+    if [ ! -s "$CERTIFICATE_PATH" ]; then
+      echo "::error::Decoded certificate is empty."
+      exit 1
+    fi
 
-jobs:
-  build-and-release-ios:
-    name: Build & Release iOS (.ipa)
-    runs-on: macos-15
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    if [ ! -s "$PP_PATH" ]; then
+      echo "::error::Decoded provisioning profile is empty."
+      exit 1
+    fi
 
-      - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
+    security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+    security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+    security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
+    security import "$CERTIFICATE_PATH" \
+      -P "${P12_PASSWORD:-}" \
+      -A \
+      -t cert \
+      -f pkcs12 \
+      -k "$KEYCHAIN_PATH"
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: 3.47.2
-          cache: true
+    security set-key-partition-list \
+      -S apple-tool:,apple:,codesign: \
+      -s \
+      -k "$KEYCHAIN_PASSWORD" \
+      "$KEYCHAIN_PATH"
 
-      - name: Install Apple Certificate and Provisioning Profile
-        env:
-          P12_BASE64: ${{ secrets.P12_BASE64 }}
-          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
-          PROVISION_BASE64: ${{ secrets.PROVISION_BASE64 }}
-        run: |
-          if [ -z "$P12_BASE64" ] || [ -z "$PROVISION_BASE64" ]; then
-            echo "::error::Missing required signing secrets (P12_BASE64 and/or PROVISION_BASE64)."
-            exit 1
-          fi
+    security list-keychains \
+      -d user \
+      -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
 
-          KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
-          KEYCHAIN_PASSWORD=$(openssl rand -base64 24)
-          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
-          PP_PATH=$RUNNER_TEMP/profile.mobileprovision
+    mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
 
-          # Robust decode using python3 to avoid shell whitespace and BSD/GNU base64 syntax issues
-          python3 -c "import base64, os; open(os.environ['CERTIFICATE_PATH'], 'wb').write(base64.b64decode(os.environ['P12_BASE64'].strip()))"
-          python3 -c "import base64, os; open(os.environ['PP_PATH'], 'wb').write(base64.b64decode(os.environ['PROVISION_BASE64'].strip()))"
+    PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
+    security cms -D -i "$PP_PATH" > "$PROFILE_PLIST"
 
-          # Verify files exist and have non-zero size
-          if [ ! -s "$CERTIFICATE_PATH" ] || [ ! -s "$PP_PATH" ]; then
-            echo "::error::Decoded certificate or provisioning profile is empty."
-            exit 1
-          fi
+    PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" "$PROFILE_PLIST")
 
-          # Create temporary keychain
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+    if [ -z "$PROFILE_UUID" ]; then
+      echo "::error::Could not determine provisioning profile UUID."
+      exit 1
+    fi
 
-          # Import certificate into keychain (handling empty or set password)
-          if [ -n "$P12_PASSWORD" ]; then
-            security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          else
-            security import "$CERTIFICATE_PATH" -P "" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          fi
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+    echo "Installing provisioning profile with UUID: $PROFILE_UUID"
 
-          # Set user keychains
-          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
-
-          # Install provisioning profile with its UUID
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          PROFILE_UUID=$(strings "$PP_PATH" | grep -A1 UUID | grep string | sed -e 's/.*<string>//' -e 's/<\/string>.*//' | head -n 1)
-          if [ -z "$PROFILE_UUID" ]; then
-            PROFILE_UUID="b62b75c1-a44f-4a2a-be0f-9a3868f95560"
-          fi
-          echo "Installing provisioning profile with UUID: $PROFILE_UUID"
-          cp "$PP_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/$PROFILE_UUID.mobileprovision
-
-      - name: Precache iOS artifacts
-        working-directory: flutter
-        run: flutter precache --ios
-
-      - name: Resolve dependencies
-        working-directory: flutter
-        run: flutter pub get
-
-      - name: Build signed iOS IPA
-        working-directory: flutter
-        run: |
-          flutter build ipa --release --export-options-plist=ios/ExportOptions.plist
-
-      - name: Stage output artifact
-        run: |
-          mkdir -p output
-          IPA_FILE=$(find flutter/build/ios/ipa -name "*.ipa" | head -n 1)
-          if [ -z "$IPA_FILE" ]; then
-            echo "::error::No .ipa file found in flutter/build/ios/ipa"
-            find flutter/build/ios -maxdepth 4
-            exit 1
-          fi
-          echo "Found generated IPA: $IPA_FILE"
-          cp "$IPA_FILE" output/ShadowPlay.ipa
-          ls -lh output/
-
-      - name: Publish to GitHub Releases (latest)
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: "ShadowPlay iOS OTA Build (Latest)"
-          body: |
-            Automated Over-The-Air iOS build for **ShadowPlay**.
-            
-            📲 **Install on iPhone/iPad:** [Install via OTA Web Page](https://aoyn1xw.github.io/ShadowPlay/)
-            
-            *(Requires first-time trust under Settings > General > VPN & Device Management)*
-          files: output/ShadowPlay.ipa
-          prerelease: false
-
-      - name: Clean up temporary keychain
-        if: always()
-        run: |
-          if [ -n "$RUNNER_TEMP" ] && [ -f "$RUNNER_TEMP/build.keychain" ]; then
-            security delete-keychain "$RUNNER_TEMP/build.keychain" || true
-          fi
+    cp "$PP_PATH" \
+      "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
