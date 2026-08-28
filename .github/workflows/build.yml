@@ -74,6 +74,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Gradle Cache
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -191,13 +194,21 @@ jobs:
         run: |
           mkdir -p dist
           # Package Windows executable and DLLs
-          cd release-assets/win-x64
-          zip -qry ../../dist/ShadowPlay-win-x64.zip .
-          cd ../..
+          if [ -d "release-assets/win-x64" ]; then
+            cd release-assets/win-x64
+            zip -qry ../../dist/ShadowPlay-win-x64.zip .
+            cd ../..
+          fi
           # Copy Android APK
-          cp release-assets/android/app-debug.apk dist/ShadowPlay-Android-debug.apk
+          APK_FILE=$(find release-assets/android -name "*.apk" | head -n 1)
+          if [ -n "$APK_FILE" ]; then
+            cp "$APK_FILE" dist/ShadowPlay-Android-debug.apk
+          fi
           # Copy iOS IPA
-          cp release-assets/ios/ShadowPlay-Flutter-ios-unsigned.ipa dist/ShadowPlay-iOS-unsigned.ipa
+          IPA_FILE=$(find release-assets/ios -name "*.ipa" | head -n 1)
+          if [ -n "$IPA_FILE" ]; then
+            cp "$IPA_FILE" dist/ShadowPlay-iOS-unsigned.ipa
+          fi
           ls -lh dist
 
       - name: Create or Update Tagged Release
