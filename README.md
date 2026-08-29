@@ -5,6 +5,8 @@ recordings folder and serves completed `.mp4` clips to your phone over the local
 A cross-platform Flutter mobile app (Android & iOS) pairs with this desktop app by scanning a QR code and downloads original,
 byte-for-byte recordings.
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/aoyn1xw/ShadowPlay)
+
 > This is an unofficial hobby project and is not affiliated with, endorsed by, or connected
 > to NVIDIA Corporation. "ShadowPlay" is a temporary working title. No NVIDIA assets are used.
 >
