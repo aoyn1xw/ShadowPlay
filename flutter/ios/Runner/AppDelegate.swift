@@ -9,7 +9,6 @@ private enum HighFrameRateVideoExportError: LocalizedError {
   case noVideoTrack
   case exportSessionUnavailable
   case unsupportedOutputType
-  case unsupportedSystemVersion
 
   var errorDescription: String? {
     switch self {
@@ -21,8 +20,6 @@ private enum HighFrameRateVideoExportError: LocalizedError {
       return "iOS could not create a passthrough video export."
     case .unsupportedOutputType:
       return "iOS cannot write this video container without re-encoding."
-    case .unsupportedSystemVersion:
-      return "Full-frame-rate Photos export requires iOS 18 or newer."
     }
   }
 }
@@ -71,10 +68,6 @@ private final class HighFrameRateVideoExporter {
 
     guard max(nominalFrameRate, minimumFrameRate) >= Self.threshold else {
       return sourceURL.path
-    }
-
-    guard #available(iOS 18.0, *) else {
-      throw HighFrameRateVideoExportError.unsupportedSystemVersion
     }
 
     guard let exportSession = AVAssetExportSession(
