@@ -54,9 +54,13 @@ flutter build apk --debug: successful
 The asynchronous preflight checks `mounted` before updating state, and QR/manual
 mode changes reset stale preflight state.
 
-`flutter/lib/core/app_permissions.dart` adds the iOS Local Network state machine
-and best-effort UDP/mDNS trigger before camera scanning or pairing. Downloaded
-clips remain in app-private scoped storage for reliable offline playback, then
+`flutter/lib/core/app_permissions.dart` maps the iOS Local Network state machine
+through the native `NWBrowser` bridge in `flutter/ios/Runner/AppDelegate.swift`
+before camera scanning or pairing. The old Dart UDP/multicast primer is no
+longer used to infer permission state. Unknown/unavailable states do not show a
+Settings instruction; the Open Settings action is limited to native policy
+denial/restriction. Downloaded clips remain in app-private scoped storage for
+reliable offline playback, then
 `flutter/lib/core/media_gallery.dart` exports each completed download to a
 ShadowPlay album in iOS Photos or Android Gallery through `gal`. A denied media
 permission does not discard the local clip; Home shows a retry/export button.

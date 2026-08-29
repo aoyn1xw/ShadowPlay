@@ -1,48 +1,68 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
+
 /// Permission states used by onboarding so transport failures are not shown
 /// while iOS is presenting its Local Network prompt.
 enum AppPermissionState {
-  idle,
+  unknown,
   requestingPermission,
   granted,
   denied,
+  restricted,
   unavailable,
 }
 
+bool shouldShowLocalNetworkSettingsAction(AppPermissionState state) =>
+    state == AppPermissionState.denied ||
+    state == AppPermissionState.restricted;
+
 class LocalNetworkPermissionService {
-  const LocalNetworkPermissionService();
+  const LocalNetworkPermissionService({this.channel, this.isIOS});
 
-  /// Best-effort trigger for Apple's Local Network prompt.
+  static const _channelName = 'shadowplay/local_network';
+
+  final MethodChannel? channel;
+  final bool? isIOS;
+
+  /// Requests local-network access through the iOS Network framework bridge.
   ///
-  /// iOS does not expose a direct Local Network permission API. Sending a
-  /// harmless one-byte mDNS multicast probe causes the OS prompt before the
-  /// pairing health request. Android does not need this trigger; its LAN
-  /// behavior is covered by the manifest permissions and cleartext policy.
+  /// iOS has no public requestLocalNetworkPermission API. The native bridge
+  /// starts an NWBrowser for a declared Bonjour service, which is a real local
+  /// network operation and lets iOS present its first-run alert. Android does
+  /// not need this trigger; its LAN behavior is covered by the manifest and
+  /// cleartext policy.
   Future<AppPermissionState> requestLocalNetworkAccess() async {
-    if (!Platform.isIOS) return AppPermissionState.granted;
-
-    RawDatagramSocket? socket;
+    if (!(isIOS ?? Platform.isIOS)) return AppPermissionState.granted;
     try {
-      socket = await RawDatagramSocket.bind(
-        InternetAddress.anyIPv4,
-        0,
-        reuseAddress: true,
-      ).timeout(const Duration(seconds: 3));
-      socket.broadcastEnabled = true;
-      final sent = socket.send(
-        const [0],
-        InternetAddress('224.0.0.251'),
-        5353,
-      );
-      return sent > 0 ? AppPermissionState.granted : AppPermissionState.denied;
+      final value = await (channel ?? const MethodChannel(_channelName))
+          .invokeMethod<String>('requestAccess')
+          .timeout(const Duration(seconds: 10));
+      return switch (value) {
+        'granted' => AppPermissionState.granted,
+        'denied' => AppPermissionState.denied,
+        'restricted' => AppPermissionState.restricted,
+        _ => AppPermissionState.unavailable,
+      };
+    } on MissingPluginException {
+      return AppPermissionState.unavailable;
+    } on PlatformException {
+      return AppPermissionState.unavailable;
     } on TimeoutException {
       return AppPermissionState.unavailable;
-    } on SocketException {
-      return AppPermissionState.denied;
-    } finally {
-      socket?.close();
+    }
+  }
+
+  Future<void> openSettings() async {
+    if (!(isIOS ?? Platform.isIOS)) return;
+    try {
+      await (channel ?? const MethodChannel(_channelName))
+          .invokeMethod<void>('openSettings');
+    } on MissingPluginException {
+      // A missing native bridge cannot be treated as a denial.
+    } on PlatformException {
+      // Settings is a best-effort recovery action.
     }
   }
 }

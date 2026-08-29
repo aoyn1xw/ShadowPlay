@@ -198,7 +198,7 @@ class _PairingPageState extends State<_PairingPage> {
   bool _busy = false;
   bool _preflightBusy = false;
   bool _preflightPassed = false;
-  AppPermissionState _permissionState = AppPermissionState.idle;
+  AppPermissionState _permissionState = AppPermissionState.unknown;
   String? _error;
   final _localNetworkPermissions = const LocalNetworkPermissionService();
 
@@ -234,7 +234,7 @@ class _PairingPageState extends State<_PairingPage> {
           _payload = payload;
           _scanning = false;
           _preflightPassed = false;
-          _permissionState = AppPermissionState.idle;
+          _permissionState = AppPermissionState.unknown;
           _address.text = payload.address;
           _port.text = payload.port.toString();
           _code.text = payload.code;
@@ -310,7 +310,7 @@ class _PairingPageState extends State<_PairingPage> {
                 _mode = value.first;
                 _scanning = false;
                 _preflightPassed = false;
-                _permissionState = AppPermissionState.idle;
+                _permissionState = AppPermissionState.unknown;
                 _error = null;
               });
             },
@@ -331,6 +331,11 @@ class _PairingPageState extends State<_PairingPage> {
                         color: Theme.of(context).colorScheme.onErrorContainer),
                     const SizedBox(width: 10),
                     Expanded(child: Text(_error!)),
+                    if (shouldShowLocalNetworkSettingsAction(_permissionState))
+                      TextButton(
+                        onPressed: _openSettings,
+                        child: const Text('Open Settings'),
+                      ),
                   ],
                 ),
               ),
@@ -369,7 +374,7 @@ class _PairingPageState extends State<_PairingPage> {
               onPressed: () => setState(() {
                 _payload = null;
                 _preflightPassed = false;
-                _permissionState = AppPermissionState.idle;
+                _permissionState = AppPermissionState.unknown;
                 _error = null;
               }),
               icon: const Icon(Icons.qr_code_scanner),
@@ -562,6 +567,8 @@ class _PairingPageState extends State<_PairingPage> {
       if (mounted) setState(() => _preflightBusy = false);
     }
   }
+
+  Future<void> _openSettings() => _localNetworkPermissions.openSettings();
 }
 
 class _ScannerError extends StatelessWidget {

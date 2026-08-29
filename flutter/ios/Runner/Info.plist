@@ -35,6 +35,10 @@
 	<string>ShadowPlay uses the camera only to scan a pairing QR code shown on your PC.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>ShadowPlay connects directly to your paired PC to find and download clips on your local network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_http._tcp</string>
+	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>ShadowPlay saves downloaded clips to your Photos library when you choose to export them.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
