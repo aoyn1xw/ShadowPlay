@@ -103,7 +103,7 @@ private final class LocalNetworkPermissionBridge {
 
     let channel = FlutterMethodChannel(
       name: "shadowplay/local_network",
-      binaryMessenger: engineBridge.applicationRegistrar.messenger
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
     )
     channel.setMethodCallHandler { [weak self] call, result in
       guard let self else {
