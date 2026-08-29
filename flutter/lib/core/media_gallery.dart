@@ -1,4 +1,12 @@
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
+
+typedef IosVideoPreparer = Future<String> Function(String path);
+typedef VideoSaver = Future<void> Function(String path, String album);
+typedef GalleryAccessCheck = Future<bool> Function(bool toAlbum);
+typedef GalleryAccessRequest = Future<bool> Function(bool toAlbum);
 
 /// Abstraction around the platform media library so downloads remain testable.
 abstract interface class MediaGallery {
@@ -23,26 +31,84 @@ class GallerySaveException implements Exception {
 
 /// Saves videos to a ShadowPlay album on iOS Photos or Android Gallery.
 class GalMediaGallery implements MediaGallery {
-  const GalMediaGallery({this.album = 'ShadowPlay'});
+  const GalMediaGallery({
+    this.album = 'ShadowPlay',
+    this.iosVideoPreparer,
+    this.videoSaver,
+    this.accessCheck,
+    this.accessRequest,
+  });
 
   final String album;
+
+  /// Optional seams for testing the iOS preparation and cleanup flow.
+  /// Production callers leave these unset.
+  final IosVideoPreparer? iosVideoPreparer;
+  final VideoSaver? videoSaver;
+  final GalleryAccessCheck? accessCheck;
+  final GalleryAccessRequest? accessRequest;
+
+  static const _iosExportChannel = MethodChannel('shadowplay/media');
 
   @override
   Future<void> saveVideo(String path) async {
     final toAlbum = album.isNotEmpty;
-    var hasAccess = await Gal.hasAccess(toAlbum: toAlbum);
+    var hasAccess = accessCheck == null
+        ? await Gal.hasAccess(toAlbum: toAlbum)
+        : await accessCheck!(toAlbum);
     if (!hasAccess) {
-      hasAccess = await Gal.requestAccess(toAlbum: toAlbum);
+      hasAccess = accessRequest == null
+          ? await Gal.requestAccess(toAlbum: toAlbum)
+          : await accessRequest!(toAlbum);
     }
     if (!hasAccess) {
       throw const GalleryAccessDeniedException();
     }
 
+    String? temporaryPath;
     try {
-      await Gal.putVideo(path, album: album);
+      final exportPath = await _preparePathForPhotos(path);
+      if (exportPath != path) temporaryPath = exportPath;
+
+      if (videoSaver != null) {
+        await videoSaver!(exportPath, album);
+      } else {
+        await Gal.putVideo(exportPath, album: album);
+      }
     } on GalException catch (error) {
       throw GallerySaveException(
           'Could not save the clip to Photos/Gallery: ${error.type}');
+    } on PlatformException catch (error) {
+      throw GallerySaveException(
+        'Could not prepare the clip for Photos: '
+        '${error.message ?? error.code}',
+      );
+    } finally {
+      if (temporaryPath != null) {
+        try {
+          await File(temporaryPath).delete();
+        } on FileSystemException {
+          // The exported copy is disposable; a cleanup failure must not
+          // turn a successful Photos import into a reported save failure.
+        }
+      }
     }
+  }
+
+  Future<String> _preparePathForPhotos(String path) async {
+    final preparer = iosVideoPreparer;
+    if (preparer != null) return preparer(path);
+    if (!Platform.isIOS) return path;
+
+    final preparedPath = await _iosExportChannel.invokeMethod<String>(
+      'prepareFullFrameRateVideo',
+      <String, Object>{'path': path},
+    );
+    if (preparedPath == null || preparedPath.isEmpty) {
+      throw const GallerySaveException(
+        'Could not prepare the clip for Photos: iOS returned no export path.',
+      );
+    }
+    return preparedPath;
   }
 }

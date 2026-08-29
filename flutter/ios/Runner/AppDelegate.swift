@@ -1,6 +1,118 @@
+import AVFoundation
+import CoreMedia
 import Flutter
 import Network
 import UIKit
+
+private enum HighFrameRateVideoExportError: LocalizedError {
+  case sourceMissing
+  case noVideoTrack
+  case exportSessionUnavailable
+  case unsupportedOutputType
+
+  var errorDescription: String? {
+    switch self {
+    case .sourceMissing:
+      return "The downloaded video file no longer exists."
+    case .noVideoTrack:
+      return "The downloaded file does not contain a video track."
+    case .exportSessionUnavailable:
+      return "iOS could not create a passthrough video export."
+    case .unsupportedOutputType:
+      return "iOS cannot write this video container without re-encoding."
+    }
+  }
+}
+
+private final class HighFrameRateVideoExporter {
+  private static let threshold: Float = 120
+
+  func prepare(
+    sourcePath: String,
+    completion: @escaping (Result<String, Error>) -> Void
+  ) {
+    Task { [self] in
+      do {
+        let path = try await prepare(sourcePath: sourcePath)
+        DispatchQueue.main.async {
+          completion(.success(path))
+        }
+      } catch {
+        DispatchQueue.main.async {
+          completion(.failure(error))
+        }
+      }
+    }
+  }
+
+  private func prepare(sourcePath: String) async throws -> String {
+    let sourceURL = URL(fileURLWithPath: sourcePath)
+    guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+      throw HighFrameRateVideoExportError.sourceMissing
+    }
+
+    let asset = AVURLAsset(url: sourceURL)
+    let tracks = try await asset.loadTracks(withMediaType: .video)
+    guard let videoTrack = tracks.first else {
+      throw HighFrameRateVideoExportError.noVideoTrack
+    }
+
+    let nominalFrameRate = try await videoTrack.load(.nominalFrameRate)
+    let minimumFrameDuration = try await videoTrack.load(.minFrameDuration)
+    let minimumFrameRate: Float
+    if minimumFrameDuration.isNumeric && minimumFrameDuration.seconds > 0 {
+      minimumFrameRate = Float(1 / minimumFrameDuration.seconds)
+    } else {
+      minimumFrameRate = 0
+    }
+
+    guard max(nominalFrameRate, minimumFrameRate) >= Self.threshold else {
+      return sourceURL.path
+    }
+
+    guard let exportSession = AVAssetExportSession(
+      asset: asset,
+      presetName: AVAssetExportPresetPassthrough
+    ) else {
+      throw HighFrameRateVideoExportError.exportSessionUnavailable
+    }
+
+    let outputType = [AVFileType.mp4, AVFileType.mov].first {
+      exportSession.supportedFileTypes.contains($0)
+    }
+    guard let outputType else {
+      throw HighFrameRateVideoExportError.unsupportedOutputType
+    }
+
+    let extensionName = outputType == .mov ? "mov" : "mp4"
+    let outputURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent(
+        "ShadowPlay-\(UUID().uuidString).\(extensionName)"
+      )
+
+    let intentIdentifier =
+      AVMetadataIdentifier.quickTimeMetadataFullFrameRatePlaybackIntent
+    var metadata = try await asset.load(.metadata).filter {
+      $0.identifier != intentIdentifier
+    }
+
+    let intent = AVMutableMetadataItem()
+    intent.identifier = intentIdentifier
+    intent.keySpace = .quickTimeMetadata
+    intent.value = NSNumber(value: UInt8(1))
+    intent.dataType = kCMMetadataBaseDataType_UInt8 as String
+    metadata.append(intent)
+    exportSession.metadata = metadata
+
+    do {
+      try await exportSession.export(to: outputURL, as: outputType)
+      return outputURL.path
+    } catch {
+      try? FileManager.default.removeItem(at: outputURL)
+      throw error
+    }
+  }
+}
 
 private final class LocalNetworkPermissionBridge {
   private var browser: NWBrowser?
@@ -90,6 +202,7 @@ private final class LocalNetworkPermissionBridge {
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private let localNetworkBridge = LocalNetworkPermissionBridge()
+  private let highFrameRateVideoExporter = HighFrameRateVideoExporter()
 
   override func application(
     _ application: UIApplication,
@@ -125,6 +238,56 @@ private final class LocalNetworkPermissionBridge {
         }
       default:
         result(FlutterMethodNotImplemented)
+      }
+    }
+
+    let mediaChannel = FlutterMethodChannel(
+      name: "shadowplay/media",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    mediaChannel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(
+          FlutterError(
+            code: "UNAVAILABLE",
+            message: "The media exporter is unavailable.",
+            details: nil
+          )
+        )
+        return
+      }
+      guard call.method == "prepareFullFrameRateVideo" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard
+        let arguments = call.arguments as? [String: Any],
+        let path = arguments["path"] as? String
+      else {
+        result(
+          FlutterError(
+            code: "INVALID_ARGUMENT",
+            message: "A video path is required.",
+            details: nil
+          )
+        )
+        return
+      }
+
+      self.highFrameRateVideoExporter.prepare(sourcePath: path) {
+        exportResult in
+        switch exportResult {
+        case .success(let preparedPath):
+          result(preparedPath)
+        case .failure(let error):
+          result(
+            FlutterError(
+              code: "HFR_EXPORT_FAILED",
+              message: error.localizedDescription,
+              details: nil
+            )
+          )
+        }
       }
     }
   }
