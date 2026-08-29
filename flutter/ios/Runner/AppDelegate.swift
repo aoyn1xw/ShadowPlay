@@ -147,8 +147,7 @@ private final class HighFrameRateVideoExporter {
 
     let detectedFrameRate = max(nominalFrameRate, minimumFrameRate)
     logger.info(
-      "frameRate nominal=\(nominalFrameRate) minimum=\(minimumFrameRate) "
-        + "detected=\(detectedFrameRate) threshold=\(Self.threshold)"
+      "frameRate nominal=\(nominalFrameRate) minimum=\(minimumFrameRate) detected=\(detectedFrameRate) threshold=\(Self.threshold)"
     )
 
     guard detectedFrameRate >= Self.threshold else {
@@ -171,8 +170,7 @@ private final class HighFrameRateVideoExporter {
     }
 
     logger.info(
-      "export preset=\(AVAssetExportPresetPassthrough, privacy: .public) "
-        + "fileType=\(outputType.rawValue, privacy: .public)"
+      "export preset=\(AVAssetExportPresetPassthrough, privacy: .public) fileType=\(outputType.rawValue, privacy: .public)"
     )
 
     let extensionName = outputType == .mov ? "mov" : "mp4"
@@ -232,8 +230,7 @@ private final class HighFrameRateVideoExporter {
         atPath: outputURL.path
       )[.size] as? NSNumber)?.int64Value ?? 0
       logger.info(
-        "export status=completed tempPath=\(outputURL.path, privacy: .public) "
-          + "tempSize=\(outputSize)"
+        "export status=completed tempPath=\(outputURL.path, privacy: .public) tempSize=\(outputSize)"
       )
 #if DEBUG
       diagnosticReport.exportStatus = "success"
@@ -250,8 +247,7 @@ private final class HighFrameRateVideoExporter {
       diagnosticReport.verifiedDataType = kCMMetadataBaseDataType_UInt8 as String
       diagnosticReport.diagnosticPath = outputURL.path
       logger.info(
-        "diagnostic MP4 path=\(outputURL.path, privacy: .public) "
-          + "exactPhotosPath=true"
+        "diagnostic MP4 path=\(outputURL.path, privacy: .public) exactPhotosPath=true"
       )
       writeDiagnosticReport(diagnosticReport)
 #endif
@@ -265,8 +261,7 @@ private final class HighFrameRateVideoExporter {
 #endif
       try? FileManager.default.removeItem(at: outputURL)
       logger.error(
-        "export status=failed tempPath=\(outputURL.path, privacy: .public) "
-          + "error=\(error.localizedDescription, privacy: .public)"
+        "export status=failed tempPath=\(outputURL.path, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
       )
       throw error
     }
@@ -289,16 +284,13 @@ private final class HighFrameRateVideoExporter {
     let numberValue = try await item.load(.numberValue)
     guard item.dataType == expectedDataType, numberValue?.intValue == 1 else {
       logger.error(
-        "metadata verification=failed reason=value-or-datatype-mismatch "
-          + "dataType=\(item.dataType ?? "nil", privacy: .public) "
-          + "value=\(numberValue?.intValue ?? -1)"
+        "metadata verification=failed reason=value-or-datatype-mismatch dataType=\(item.dataType ?? "nil", privacy: .public) value=\(numberValue?.intValue ?? -1)"
       )
       throw HighFrameRateVideoExportError.metadataVerificationFailed
     }
 
     logger.info(
-      "metadata verification=passed identifier=\(String(describing: identifier), privacy: .public) "
-        + "value=1 dataType=\(expectedDataType, privacy: .public)"
+      "metadata verification=passed identifier=\(String(describing: identifier), privacy: .public) value=1 dataType=\(expectedDataType, privacy: .public)"
     )
   }
 
@@ -308,8 +300,7 @@ private final class HighFrameRateVideoExporter {
     error: String?
   ) {
     logger.info(
-      "photos handoff path=\(path, privacy: .public) "
-        + "status=\(status, privacy: .public)"
+      "photos handoff path=\(path, privacy: .public) status=\(status, privacy: .public)"
     )
 #if DEBUG
     guard let reportURL = diagnosticReportURL(for: path),
