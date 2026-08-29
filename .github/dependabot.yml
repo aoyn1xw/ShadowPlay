@@ -1,0 +1,21 @@
+version: 2
+
+updates:
+  - package-ecosystem: "nuget"
+    directories:
+      - "/src/ShadowPlay.Api"
+      - "/src/ShadowPlay.Core"
+      - "/src/ShadowPlay.Windows"
+      - "/tests/ShadowPlay.Tests"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "pub"
+    directory: "/flutter"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
