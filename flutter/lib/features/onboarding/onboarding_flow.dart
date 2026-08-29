@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/app_state.dart';
+import '../../core/app_permissions.dart';
 import '../../core/models.dart';
 import '../../core/shadowplay_api.dart';
 
@@ -197,7 +198,9 @@ class _PairingPageState extends State<_PairingPage> {
   bool _busy = false;
   bool _preflightBusy = false;
   bool _preflightPassed = false;
+  AppPermissionState _permissionState = AppPermissionState.idle;
   String? _error;
+  final _localNetworkPermissions = const LocalNetworkPermissionService();
 
   @override
   void initState() {
@@ -231,6 +234,7 @@ class _PairingPageState extends State<_PairingPage> {
           _payload = payload;
           _scanning = false;
           _preflightPassed = false;
+          _permissionState = AppPermissionState.idle;
           _address.text = payload.address;
           _port.text = payload.port.toString();
           _code.text = payload.code;
@@ -306,6 +310,7 @@ class _PairingPageState extends State<_PairingPage> {
                 _mode = value.first;
                 _scanning = false;
                 _preflightPassed = false;
+                _permissionState = AppPermissionState.idle;
                 _error = null;
               });
             },
@@ -332,8 +337,7 @@ class _PairingPageState extends State<_PairingPage> {
             ),
           ],
           const SizedBox(height: 20),
-          if (_payload != null || _mode == _PairMode.manual)
-            _preflightAction(),
+          if (_payload != null || _mode == _PairMode.manual) _preflightAction(),
           if ((_payload != null || _mode == _PairMode.manual) &&
               _preflightPassed)
             FilledButton(
@@ -365,6 +369,7 @@ class _PairingPageState extends State<_PairingPage> {
               onPressed: () => setState(() {
                 _payload = null;
                 _preflightPassed = false;
+                _permissionState = AppPermissionState.idle;
                 _error = null;
               }),
               icon: const Icon(Icons.qr_code_scanner),
@@ -412,9 +417,11 @@ class _PairingPageState extends State<_PairingPage> {
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
-            onPressed: () => setState(() => _scanning = true),
+            onPressed: _preflightBusy ? null : _openCamera,
             icon: const Icon(Icons.camera_alt_outlined),
-            label: const Text('Open Camera'),
+            label: Text(
+              _preflightBusy ? 'Requesting permissions…' : 'Open Camera',
+            ),
           ),
         ),
       ],
@@ -454,7 +461,9 @@ class _PairingPageState extends State<_PairingPage> {
 
   Widget _preflightAction() {
     final label = _preflightBusy
-        ? 'Checking PC connection…'
+        ? _permissionState == AppPermissionState.requestingPermission
+            ? 'Requesting Local Network access…'
+            : 'Checking PC connection…'
         : _preflightPassed
             ? 'PC reachable on this Wi‑Fi'
             : _mode == _PairMode.qr
@@ -481,7 +490,10 @@ class _PairingPageState extends State<_PairingPage> {
 
   Future<void> _runPreflight() async {
     final port = int.tryParse(_port.text);
-    if (_address.text.trim().isEmpty || port == null || port < 1 || port > 65535) {
+    if (_address.text.trim().isEmpty ||
+        port == null ||
+        port < 1 ||
+        port > 65535) {
       if (mounted) {
         setState(() => _error = 'Enter the PC address and port first.');
       }
@@ -491,13 +503,61 @@ class _PairingPageState extends State<_PairingPage> {
     setState(() {
       _preflightBusy = true;
       _preflightPassed = false;
+      _permissionState = AppPermissionState.requestingPermission;
       _error = null;
     });
     try {
+      final permission =
+          await _localNetworkPermissions.requestLocalNetworkAccess();
+      if (permission != AppPermissionState.granted) {
+        if (mounted) {
+          setState(() {
+            _permissionState = permission;
+            _error = permission == AppPermissionState.denied
+                ? 'Local Network access is required. Allow it in iPhone Settings > ShadowPlay, then try again.'
+                : 'Local Network access is not available yet. Connect to Wi‑Fi and try again.';
+          });
+        }
+        return;
+      }
+      if (mounted) {
+        setState(() => _permissionState = AppPermissionState.granted);
+      }
       await ShadowPlayApi.health(address: _address.text.trim(), port: port);
       if (mounted) setState(() => _preflightPassed = true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _preflightBusy = false);
+    }
+  }
+
+  Future<void> _openCamera() async {
+    setState(() {
+      _preflightBusy = true;
+      _permissionState = AppPermissionState.requestingPermission;
+      _error = null;
+    });
+    try {
+      final permission =
+          await _localNetworkPermissions.requestLocalNetworkAccess();
+      if (permission != AppPermissionState.granted) {
+        if (mounted) {
+          setState(() {
+            _permissionState = permission;
+            _error = permission == AppPermissionState.denied
+                ? 'Local Network access is required before scanning. Allow it in iPhone Settings > ShadowPlay, then try again.'
+                : 'Local Network access is not available yet. Connect to Wi‑Fi and try again.';
+          });
+        }
+        return;
+      }
+      if (mounted) {
+        setState(() {
+          _permissionState = AppPermissionState.granted;
+          _scanning = true;
+        });
+      }
     } finally {
       if (mounted) setState(() => _preflightBusy = false);
     }
