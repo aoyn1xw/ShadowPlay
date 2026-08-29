@@ -68,12 +68,35 @@ class GalMediaGallery implements MediaGallery {
     String? temporaryPath;
     try {
       final exportPath = await _preparePathForPhotos(path);
-      if (exportPath != path) temporaryPath = exportPath;
+      if (exportPath != path && !_isPersistentDiagnosticPath(exportPath)) {
+        temporaryPath = exportPath;
+      }
 
-      if (videoSaver != null) {
-        await videoSaver!(exportPath, album);
-      } else {
-        await Gal.putVideo(exportPath, album: album);
+      final shouldReportPhotosSave =
+          exportPath != path && iosVideoPreparer == null && Platform.isIOS;
+      if (shouldReportPhotosSave) {
+        await _recordPhotosSaveResult(exportPath, status: 'started');
+      }
+
+      try {
+        if (videoSaver != null) {
+          await videoSaver!(exportPath, album);
+        } else {
+          await Gal.putVideo(exportPath, album: album);
+        }
+      } catch (error) {
+        if (shouldReportPhotosSave) {
+          await _recordPhotosSaveResult(
+            exportPath,
+            status: 'failure',
+            error: error.toString(),
+          );
+        }
+        rethrow;
+      }
+
+      if (shouldReportPhotosSave) {
+        await _recordPhotosSaveResult(exportPath, status: 'success');
       }
     } on GalException catch (error) {
       throw GallerySaveException(
@@ -110,5 +133,30 @@ class GalMediaGallery implements MediaGallery {
       );
     }
     return preparedPath;
+  }
+
+  Future<void> _recordPhotosSaveResult(
+    String path, {
+    required String status,
+    String? error,
+  }) async {
+    try {
+      await _iosExportChannel.invokeMethod<void>(
+        'recordPhotosSaveResult',
+        <String, Object?>{
+          'path': path,
+          'status': status,
+          if (error != null) 'error': error,
+        },
+      );
+    } on MissingPluginException {
+      // Diagnostics are best-effort and must not affect Photos saving.
+    } on PlatformException {
+      // Diagnostics are best-effort and must not affect Photos saving.
+    }
+  }
+
+  bool _isPersistentDiagnosticPath(String path) {
+    return Platform.isIOS && path.contains('/ShadowPlayDiagnostics/');
   }
 }
