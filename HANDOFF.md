@@ -65,6 +65,13 @@ The platform declarations now include iOS photo-library usage strings and the
 Android Gal requirements (`READ_MEDIA_VIDEO`, legacy write permission through
 API 29, and `requestLegacyExternalStorage` for Android 10 album writes).
 
+## Linux CI Windows-targeting fix
+
+`src/ShadowPlay.Windows/ShadowPlay.Windows.csproj` now sets
+`EnableWindowsTargeting=true`. This lets Linux dependency/code-analysis jobs
+restore the `net8.0-windows` WPF project instead of failing with NETSDK1100;
+Windows release builds remain unchanged.
+
 ## Previously verified before the latest permission edit
 
 - `dotnet build src\ShadowPlay.Windows\ShadowPlay.Windows.csproj --configuration Release`: passed with 0 warnings/errors.
