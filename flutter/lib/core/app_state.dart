@@ -6,11 +6,12 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'media_gallery.dart';
 import 'models.dart';
 import 'shadowplay_api.dart';
 
 class AppState extends ChangeNotifier {
-  AppState._(this._prefs, this._secureStorage);
+  AppState._(this._prefs, this._secureStorage, this._mediaGallery);
 
   static const _connectionsKey = 'connections';
   static const _activeServerKey = 'activeServerId';
@@ -22,6 +23,7 @@ class AppState extends ChangeNotifier {
 
   final SharedPreferences _prefs;
   final FlutterSecureStorage _secureStorage;
+  final MediaGallery? _mediaGallery;
 
   List<Connection> connections = [];
   List<Clip> remoteClips = [];
@@ -29,6 +31,8 @@ class AppState extends ChangeNotifier {
   final Map<String, DeviceStatus> deviceStatuses = {};
   final Map<String, double?> downloadProgress = {};
   final Map<String, String> downloadFailures = {};
+  final Map<String, String> gallerySaveFailures = {};
+  final Set<String> gallerySavedIds = {};
 
   String? activeServerId;
   String? _activeToken;
@@ -44,6 +48,7 @@ class AppState extends ChangeNotifier {
     final state = AppState._(
       await SharedPreferences.getInstance(),
       const FlutterSecureStorage(),
+      const GalMediaGallery(),
     );
     await state._restore();
     return state;
@@ -57,14 +62,16 @@ class AppState extends ChangeNotifier {
     String? activeServerId,
     String? activeToken,
     bool onboardingCompleted = false,
+    MediaGallery? mediaGallery,
   }) {
-    final state = AppState._(preferences, const FlutterSecureStorage())
-      ..connections = List.of(connections)
-      ..remoteClips = List.of(remoteClips)
-      ..downloadedClips = List.of(downloadedClips)
-      ..activeServerId = activeServerId
-      .._activeToken = activeToken
-      ..onboardingCompleted = onboardingCompleted;
+    final state =
+        AppState._(preferences, const FlutterSecureStorage(), mediaGallery)
+          ..connections = List.of(connections)
+          ..remoteClips = List.of(remoteClips)
+          ..downloadedClips = List.of(downloadedClips)
+          ..activeServerId = activeServerId
+          .._activeToken = activeToken
+          ..onboardingCompleted = onboardingCompleted;
     return state;
   }
 
@@ -237,7 +244,8 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> downloadClips(Iterable<Clip> clips, {int maxConcurrent = 2}) async {
+  Future<void> downloadClips(Iterable<Clip> clips,
+      {int maxConcurrent = 2}) async {
     final pending =
         clips.where((clip) => !downloadedIds.contains(clip.id)).toList();
     if (pending.isEmpty) return;
@@ -261,6 +269,8 @@ class AppState extends ChangeNotifier {
     final client = api;
     if (client == null) return;
     downloadFailures.remove(clip.id);
+    gallerySaveFailures.remove(clip.id);
+    gallerySavedIds.remove(clip.id);
     downloadProgress[clip.id] = null;
     notifyListeners();
 
@@ -295,6 +305,22 @@ class AppState extends ChangeNotifier {
       downloadedClips.insert(0, DownloadedClip.fromRemote(clip, finalFile));
       downloadProgress.remove(clip.id);
       await _saveDownloads();
+
+      final gallery = _mediaGallery;
+      if (gallery != null) {
+        try {
+          await gallery.saveVideo(finalFile.path);
+          gallerySavedIds.add(clip.id);
+          gallerySaveFailures.remove(clip.id);
+        } on GalleryAccessDeniedException catch (error) {
+          gallerySaveFailures[clip.id] = error.toString();
+        } on GallerySaveException catch (error) {
+          gallerySaveFailures[clip.id] = error.toString();
+        } catch (error) {
+          gallerySaveFailures[clip.id] =
+              'Could not save the clip to Photos/Gallery: $error';
+        }
+      }
     } catch (error) {
       await sink?.close();
       if (partialFile != null && await partialFile.exists()) {
@@ -306,6 +332,29 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Retries exporting an already-downloaded clip to the platform gallery.
+  /// The local playback copy is retained even when export is denied or fails.
+  Future<bool> saveClipToGallery(DownloadedClip clip) async {
+    final gallery = _mediaGallery;
+    if (gallery == null) return false;
+    try {
+      await gallery.saveVideo(clip.localPath);
+      gallerySavedIds.add(clip.id);
+      gallerySaveFailures.remove(clip.id);
+      notifyListeners();
+      return true;
+    } on GalleryAccessDeniedException catch (error) {
+      gallerySaveFailures[clip.id] = error.toString();
+    } on GallerySaveException catch (error) {
+      gallerySaveFailures[clip.id] = error.toString();
+    } catch (error) {
+      gallerySaveFailures[clip.id] =
+          'Could not save the clip to Photos/Gallery: $error';
+    }
+    notifyListeners();
+    return false;
+  }
+
   Future<void> clearDownloadedClips() async {
     for (final clip in downloadedClips) {
       final file = File(clip.localPath);
@@ -313,6 +362,8 @@ class AppState extends ChangeNotifier {
     }
     downloadedClips = [];
     downloadFailures.clear();
+    gallerySaveFailures.clear();
+    gallerySavedIds.clear();
     await _saveDownloads();
     notifyListeners();
   }
