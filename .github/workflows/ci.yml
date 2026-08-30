@@ -192,7 +192,7 @@ jobs:
             exit 1
           fi
 
-          "$sdkmanager_path" "platforms;android-37"
+          "$sdkmanager_path" "platforms;android-37.0"
 
       - name: Resolve dependencies
         run: flutter pub get
