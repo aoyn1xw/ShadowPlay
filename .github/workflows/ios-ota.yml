@@ -2,12 +2,6 @@ name: iOS Signed OTA Build
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - "flutter/**"
-      - ".github/workflows/ios-ota.yml"
 
 concurrency:
   group: ios-signed-${{ github.ref }}
