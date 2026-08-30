@@ -1,0 +1,137 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows release
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore ShadowPlay.sln
+
+      - name: Publish
+        run: >
+          dotnet publish
+          src/ShadowPlay.Windows/ShadowPlay.Windows.csproj
+          -c Release
+          -r win-x64
+          --self-contained false
+          --no-restore
+          -o publish/win-x64
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: publish/win-x64/
+          if-no-files-found: error
+
+  android:
+    name: Android release
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: flutter
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: true
+
+      - name: Precache Android artifacts
+        run: flutter precache --android
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload Android build
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: flutter/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs:
+      - windows
+      - android
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: release-windows
+          path: release-assets/windows
+
+      - name: Download Android build
+        uses: actions/download-artifact@v4
+        with:
+          name: release-android
+          path: release-assets/android
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+
+          (cd release-assets/windows && zip -qry ../../dist/ShadowPlay-win-x64.zip .)
+
+          APK_FILE="$(find release-assets/android -type f -name '*.apk' | head -n 1)"
+          if [ -z "$APK_FILE" ]; then
+            echo "::error::Android APK not found"
+            exit 1
+          fi
+
+          cp "$APK_FILE" dist/ShadowPlay-Android.apk
+          ls -lh dist
+
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true

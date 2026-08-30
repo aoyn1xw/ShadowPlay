@@ -40,6 +40,8 @@ The checked-in Android manifest grants camera and internet access and allows
 cleartext LAN traffic for the current HTTP v1 desktop API. The API is intended
 for trusted home Wi-Fi; HTTP does not provide transport confidentiality.
 
-GitHub Actions builds `ShadowPlay-Flutter-android-debug.apk` on Linux and an
-unsigned `ShadowPlay-Flutter-ios-unsigned.ipa` on macOS. The iOS artifact must
-be signed before it can be installed on a physical device.
+GitHub Actions compiles the Android debug APK and unsigned iOS app during pull-request
+validation without publishing those intermediate outputs. Version tags build the Android
+release APK, while signed iOS distribution is handled separately by the repository's
+[`ios-ota.yml`](../.github/workflows/ios-ota.yml) workflow. The unsigned iOS build must be
+signed before it can be installed on a physical device.
