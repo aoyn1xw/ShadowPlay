@@ -24,7 +24,7 @@ void main() {
 
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
-    expect(find.text('Allow Camera'), findsOneWidget);
+    expect(find.text('Before You Pair'), findsOneWidget);
     expect(find.text('Open Camera'), findsNothing);
 
     await tester.tap(find.text('Continue'));
@@ -39,7 +39,8 @@ void main() {
     expect(find.text('Port'), findsOneWidget);
     expect(find.text('Pairing code'), findsOneWidget);
     expect(find.text('Device name'), findsOneWidget);
-    expect(find.text('Pair Device'), findsOneWidget);
+    expect(find.text('Check PC connection'), findsOneWidget);
+    expect(find.text('Pair Device'), findsNothing);
   });
 
   testWidgets('main shell has exactly Home Clips and Settings destinations',

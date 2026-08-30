@@ -34,7 +34,7 @@ Tailscale, so the UI could incorrectly say the Private rule was active while
 Wi-Fi was Public. The new check requires an active traffic-carrying Private
 profile.
 
-## Permission-flow work started but not verified
+## Permission-flow implementation
 
 `flutter/lib/features/onboarding/onboarding_flow.dart` now:
 
@@ -43,21 +43,38 @@ profile.
 - Adds an explicit **Check PC connection** action for manual pairing.
 - Keeps **Pair Device** disabled until health succeeds.
 
-This file has not yet been formatted, analyzed, tested, or built after the
-latest edit. Resume by running:
+The flow is formatted and verified. The current checks pass:
 
-```powershell
-cd C:\Users\ayon1xw\Documents\GitHub\ShadowPlay\flutter
-dart format lib test
-flutter analyze
-flutter test --reporter expanded
-flutter build apk --debug
+```text
+flutter analyze: no issues
+flutter test: 15 passed
+flutter build apk --debug: successful
 ```
 
-Inspect the widget layout and test the QR/manual paths before keeping the
-permission-flow change. In particular, verify that an asynchronous preflight
-cannot update state after the page is disposed and that switching between QR
-and manual modes resets stale preflight state.
+The asynchronous preflight checks `mounted` before updating state, and QR/manual
+mode changes reset stale preflight state.
+
+`flutter/lib/core/app_permissions.dart` maps the iOS Local Network state machine
+through the native `NWBrowser` bridge in `flutter/ios/Runner/AppDelegate.swift`
+before camera scanning or pairing. The old Dart UDP/multicast primer is no
+longer used to infer permission state. Unknown/unavailable states do not show a
+Settings instruction; the Open Settings action is limited to native policy
+denial/restriction. Downloaded clips remain in app-private scoped storage for
+reliable offline playback, then
+`flutter/lib/core/media_gallery.dart` exports each completed download to a
+ShadowPlay album in iOS Photos or Android Gallery through `gal`. A denied media
+permission does not discard the local clip; Home shows a retry/export button.
+
+The platform declarations now include iOS photo-library usage strings and the
+Android Gal requirements (`READ_MEDIA_VIDEO`, legacy write permission through
+API 29, and `requestLegacyExternalStorage` for Android 10 album writes).
+
+## Linux CI Windows-targeting fix
+
+`src/ShadowPlay.Windows/ShadowPlay.Windows.csproj` now sets
+`EnableWindowsTargeting=true`. This lets Linux dependency/code-analysis jobs
+restore the `net8.0-windows` WPF project instead of failing with NETSDK1100;
+Windows release builds remain unchanged.
 
 ## Previously verified before the latest permission edit
 

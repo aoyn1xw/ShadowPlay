@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shadowplay/core/app_state.dart';
+import 'package:shadowplay/core/media_gallery.dart';
 import 'package:shadowplay/core/models.dart';
 import 'package:shadowplay/core/shadowplay_api.dart';
 
@@ -223,4 +224,60 @@ void main() {
       ),
     );
   });
+
+  test('downloaded clips can be exported to the media gallery', () async {
+    final preferences = await SharedPreferences.getInstance();
+    final gallery = _FakeMediaGallery();
+    final clip = DownloadedClip(
+      id: 'clip-1',
+      fileName: 'Ace.mp4',
+      sizeBytes: 100,
+      lastWriteTimeUtc: DateTime.utc(2026, 8, 28),
+      localPath: 'clip-1.mp4',
+    );
+    final state = AppState.forTesting(
+      preferences,
+      mediaGallery: gallery,
+      downloadedClips: [clip],
+    );
+
+    expect(await state.saveClipToGallery(clip), isTrue);
+    expect(gallery.savedPaths, ['clip-1.mp4']);
+    expect(state.gallerySavedIds, contains('clip-1'));
+    expect(state.gallerySaveFailures, isEmpty);
+  });
+
+  test('gallery export failure preserves the local clip and reports why',
+      () async {
+    final preferences = await SharedPreferences.getInstance();
+    final gallery = _FakeMediaGallery()
+      ..error = const GalleryAccessDeniedException();
+    final clip = DownloadedClip(
+      id: 'clip-2',
+      fileName: 'Denied.mp4',
+      sizeBytes: 100,
+      lastWriteTimeUtc: DateTime.utc(2026, 8, 28),
+      localPath: 'clip-2.mp4',
+    );
+    final state = AppState.forTesting(
+      preferences,
+      mediaGallery: gallery,
+      downloadedClips: [clip],
+    );
+
+    expect(await state.saveClipToGallery(clip), isFalse);
+    expect(state.downloadedClips, contains(clip));
+    expect(state.gallerySaveFailures['clip-2'], contains('not granted'));
+  });
+}
+
+class _FakeMediaGallery implements MediaGallery {
+  final savedPaths = <String>[];
+  Object? error;
+
+  @override
+  Future<void> saveVideo(String path) async {
+    if (error != null) throw error!;
+    savedPaths.add(path);
+  }
 }
