@@ -78,6 +78,10 @@ Key decisions:
 - To *run* the published app: [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0)
   **and** the ASP.NET Core 8 Runtime
 - No NVIDIA software is required to build or test
+- To build the Flutter mobile client: Flutter **3.47.2** and Java **17**
+- Android builds require Android SDK platform **37.0** because
+  `flutter_secure_storage` **11.0.0** requires compilation against Android API 37.
+  This does not change the app's minimum or target Android SDK settings.
 
 ## Restore, build, test, run
 
@@ -234,7 +238,8 @@ The workflows are separated by purpose:
 
 - [`ci.yml`](.github/workflows/ci.yml) runs on pull requests and manual dispatch. It owns the
   Windows build/test/smoke check, shared Flutter dependency/analyze/test validation, Android
-  debug compilation, and unsigned iOS compilation. PR CI does not use iOS signing secrets.
+  debug compilation, and unsigned iOS compilation. The Android job installs platform 37.0
+  before compiling. PR CI does not use iOS signing secrets.
 - [`release.yml`](.github/workflows/release.yml) runs for version tags matching `v*`. It builds
   the Windows release and Android release APK, then creates or updates the tagged GitHub Release.
 - [`ios-ota.yml`](.github/workflows/ios-ota.yml) runs through manual dispatch, keeping signed
