@@ -163,6 +163,9 @@ jobs:
       - name: Precache Android artifacts
         run: flutter precache --android
 
+      - name: Install Android API 37
+        run: sdkmanager "platforms;android-37"
+
       - name: Resolve dependencies
         run: flutter pub get
 
