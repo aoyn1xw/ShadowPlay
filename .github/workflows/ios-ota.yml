@@ -7,7 +7,7 @@ on:
       - main
     paths:
       - "flutter/**"
-      - ".github/workflows/ios-build.yml"
+      - ".github/workflows/ios-ota.yml"
 
 concurrency:
   group: ios-signed-${{ github.ref }}
