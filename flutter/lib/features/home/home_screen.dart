@@ -74,6 +74,20 @@ class HomeScreen extends StatelessWidget {
                   final clip = state.downloadedClips[index];
                   return _DownloadedClipCard(
                     clip: clip,
+                    gallerySaved: state.gallerySavedIds.contains(clip.id),
+                    galleryFailure: state.gallerySaveFailures[clip.id],
+                    onSave: () async {
+                      final saved = await state.saveClipToGallery(clip);
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(saved
+                              ? 'Clip saved to Photos/Gallery.'
+                              : state.gallerySaveFailures[clip.id] ??
+                                  'Could not save the clip to Photos/Gallery.'),
+                        ),
+                      );
+                    },
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
                           builder: (_) => PlayerScreen(clip: clip)),
@@ -89,9 +103,18 @@ class HomeScreen extends StatelessWidget {
 }
 
 class _DownloadedClipCard extends StatelessWidget {
-  const _DownloadedClipCard({required this.clip, required this.onTap});
+  const _DownloadedClipCard({
+    required this.clip,
+    required this.onTap,
+    required this.onSave,
+    required this.gallerySaved,
+    this.galleryFailure,
+  });
   final DownloadedClip clip;
   final VoidCallback onTap;
+  final Future<void> Function() onSave;
+  final bool gallerySaved;
+  final String? galleryFailure;
 
   @override
   Widget build(BuildContext context) => Material(
@@ -103,7 +126,33 @@ class _DownloadedClipCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: _LocalVideoPreview(path: clip.localPath)),
+              Expanded(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _LocalVideoPreview(path: clip.localPath),
+                    Positioned(
+                      top: 6,
+                      right: 6,
+                      child: IconButton.filledTonal(
+                        tooltip: gallerySaved
+                            ? 'Saved to Photos/Gallery'
+                            : 'Save to Photos/Gallery',
+                        onPressed: gallerySaved
+                            ? null
+                            : () {
+                                onSave();
+                              },
+                        icon: Icon(gallerySaved
+                            ? Icons.check
+                            : galleryFailure == null
+                                ? Icons.save_alt
+                                : Icons.warning_amber_rounded),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
                 child: Text(

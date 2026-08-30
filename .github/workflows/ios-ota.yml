@@ -1,190 +1,18 @@
-name: build
+name: iOS Signed OTA Build
 
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
-  pull_request:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ios-signed-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: write
 
 jobs:
-  windows:
-    name: Windows exe (win-x64)
-    runs-on: windows-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-
-      - name: Restore
-        run: dotnet restore ShadowPlay.sln
-
-      - name: Build
-        run: dotnet build ShadowPlay.sln -c Release --no-restore
-
-      - name: Test
-        run: dotnet test ShadowPlay.sln -c Release --no-build
-
-      - name: Publish win-x64
-        run: >
-          dotnet publish
-          src/ShadowPlay.Windows/ShadowPlay.Windows.csproj
-          -c Release
-          -r win-x64
-          --self-contained false
-          -o publish/win-x64
-
-      - name: Smoke test
-        shell: pwsh
-        run: |
-          $clips = Join-Path $env:RUNNER_TEMP "smoke-clips"
-          New-Item -ItemType Directory -Force -Path $clips | Out-Null
-
-          $bytes = New-Object byte[] 40960
-          (New-Object Random 1).NextBytes($bytes)
-
-          [IO.File]::WriteAllBytes(
-            (Join-Path $clips "clip_a.mp4"),
-            $bytes
-          )
-
-          [IO.File]::WriteAllBytes(
-            (Join-Path $clips "clip_b.mp4"),
-            $bytes[0..8191]
-          )
-
-          $out = & ".\publish\win-x64\ShadowPlay.exe" `
-            --smoke `
-            --folder $clips `
-            --port 0 `
-            --smoke-seconds 12 |
-            Out-String
-
-          Write-Host $out
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "smoke run exited with $LASTEXITCODE"
-          }
-
-          if ($out -notmatch 'SMOKE_OK') {
-            throw "health never became ready"
-          }
-
-          if ($out -notmatch '"clips":2') {
-            throw "expected 2 clips to be detected"
-          }
-
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: ShadowPlay-win-x64
-          path: publish/win-x64/
-          if-no-files-found: error
-
-
-  flutter-android:
-    name: Flutter Android
-    runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: flutter
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Gradle cache
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: 3.47.2
-          cache: true
-
-      - name: Precache Android artifacts
-        run: flutter precache --android
-
-      - name: Resolve dependencies
-        run: flutter pub get
-
-      - name: Analyze
-        run: flutter analyze
-
-      - name: Test
-        run: flutter test
-
-      - name: Build Android debug APK
-        run: flutter build apk --debug
-
-      - name: Upload Android artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: ShadowPlay-Flutter-android-debug
-          path: flutter/build/app/outputs/flutter-apk/app-debug.apk
-          if-no-files-found: error
-
-
-  flutter-ios-pr:
-    name: Flutter iOS compile check
-    if: github.event_name == 'pull_request'
-    runs-on: macos-15
-
-    defaults:
-      run:
-        working-directory: flutter
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: 3.47.2
-          cache: true
-
-      - name: Precache iOS artifacts
-        run: flutter precache --ios
-
-      - name: Resolve dependencies
-        run: flutter pub get
-
-      - name: Analyze
-        run: flutter analyze
-
-      - name: Test
-        run: flutter test
-
-      - name: Build unsigned iOS app
-        run: flutter build ios --release --no-codesign
-
-
-  ios-signed:
-    name: Flutter iOS signed IPA
-    if: github.event_name != 'pull_request'
+  build-ios:
+    name: Build signed iOS OTA IPA
     runs-on: macos-15
 
     steps:
@@ -250,19 +78,17 @@ jobs:
           import os
 
           with open(os.environ["CERTIFICATE_PATH"], "wb") as f:
-              f.write(
-                  base64.b64decode(
-                      os.environ["P12_BASE64"].strip()
-                  )
-              )
+              f.write(base64.b64decode(os.environ["P12_BASE64"].strip()))
 
           with open(os.environ["PROFILE_PATH"], "wb") as f:
-              f.write(
-                  base64.b64decode(
-                      os.environ["PROVISION_BASE64"].strip()
-                  )
-              )
+              f.write(base64.b64decode(os.environ["PROVISION_BASE64"].strip()))
           PY
+
+          echo "Decoded P12 size:"
+          wc -c "$CERTIFICATE_PATH"
+
+          echo "Decoded provisioning profile size:"
+          wc -c "$PROFILE_PATH"
 
           if [ ! -s "$CERTIFICATE_PATH" ]; then
             echo "::error::Decoded certificate is empty"
@@ -331,9 +157,9 @@ jobs:
             "$KEYCHAIN_PATH"
 
           EXISTING_KEYCHAINS="$(
-            security list-keychains -d user |
-            tr -d '"' |
-            tr '\n' ' '
+            security list-keychains -d user \
+              | tr -d '"' \
+              | tr '\n' ' '
           )"
 
           security list-keychains \
@@ -344,6 +170,8 @@ jobs:
             -d user \
             -s "$KEYCHAIN_PATH"
 
+          echo "Installed signing identities:"
+
           security find-identity \
             -v \
             -p codesigning \
@@ -353,10 +181,10 @@ jobs:
             security find-identity \
               -v \
               -p codesigning \
-              "$KEYCHAIN_PATH" |
-            grep '"Apple Distribution:' |
-            head -n 1 |
-            awk '{print $2}'
+              "$KEYCHAIN_PATH" \
+            | grep '"Apple Distribution:' \
+            | head -n 1 \
+            | awk '{print $2}'
           )"
 
           if [ -z "$CERT_SHA" ]; then
@@ -399,6 +227,7 @@ jobs:
           echo "Profile name: $PROFILE_NAME"
           echo "Team ID: $TEAM_ID"
           echo "Bundle ID: $BUNDLE_ID"
+          echo "Certificate SHA: $CERT_SHA"
 
           if [ -z "$PROFILE_UUID" ] || \
              [ -z "$PROFILE_NAME" ] || \
@@ -409,7 +238,7 @@ jobs:
           fi
 
           if [ "$BUNDLE_ID" != "app.winter6686.date9988" ]; then
-            echo "::error::Provisioning profile bundle ID does not match"
+            echo "::error::Provisioning profile bundle ID does not match the app"
             exit 1
           fi
 
@@ -418,7 +247,7 @@ jobs:
             "$PROFILE_PLIST" \
             >/dev/null 2>&1
           then
-            echo "::error::Profile is not an Ad Hoc profile"
+            echo "::error::This does not appear to be an Ad Hoc provisioning profile"
             exit 1
           fi
 
@@ -503,13 +332,12 @@ jobs:
           export TEAM_ID
           export BUNDLE_ID
           export CERT_SHA
+          export KEYCHAIN_PATH
 
           ruby <<'RUBY'
           require "xcodeproj"
 
-          project = Xcodeproj::Project.open(
-            "Runner.xcodeproj"
-          )
+          project = Xcodeproj::Project.open("Runner.xcodeproj")
 
           runner = project.targets.find do |target|
             target.name == "Runner"
@@ -529,9 +357,7 @@ jobs:
           settings["CODE_SIGN_IDENTITY"] = ENV.fetch("CERT_SHA")
           settings["DEVELOPMENT_TEAM"] = ENV.fetch("TEAM_ID")
           settings["PRODUCT_BUNDLE_IDENTIFIER"] = ENV.fetch("BUNDLE_ID")
-          settings["PROVISIONING_PROFILE_SPECIFIER"] =
-            ENV.fetch("PROFILE_NAME")
-
+          settings["PROVISIONING_PROFILE_SPECIFIER"] = ENV.fetch("PROFILE_NAME")
           settings.delete("PROVISIONING_PROFILE")
 
           project.save
@@ -553,9 +379,9 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -destination "generic/platform=iOS" \
-            -showBuildSettings |
-          grep -E \
-            "PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER"
+            -showBuildSettings \
+            | grep -E \
+              "PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER"
 
       - name: Archive signed iOS app
         working-directory: flutter/ios
@@ -563,6 +389,11 @@ jobs:
           set -euo pipefail
 
           rm -rf "$ARCHIVE_PATH"
+
+          security unlock-keychain \
+            -p "" \
+            "$KEYCHAIN_PATH" \
+            2>/dev/null || true
 
           xcodebuild \
             -workspace Runner.xcworkspace \
@@ -584,12 +415,14 @@ jobs:
             exit 1
           fi
 
+          echo "Code signature:"
+
           codesign \
             -dvvv \
             "$APP_PATH" \
-            2>&1 |
-          grep -E \
-            "Identifier=|Authority=|TeamIdentifier="
+            2>&1 \
+            | grep -E \
+              "Identifier=|Authority=|TeamIdentifier="
 
           if [ ! -f "$APP_PATH/embedded.mobileprovision" ]; then
             echo "::error::Archive has no embedded provisioning profile"
@@ -606,6 +439,15 @@ jobs:
               -c "Print :UUID" \
               "$RUNNER_TEMP/embedded-profile.plist"
           )"
+
+          EMBEDDED_APP_ID="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :Entitlements:application-identifier" \
+              "$RUNNER_TEMP/embedded-profile.plist"
+          )"
+
+          echo "Embedded profile UUID: $EMBEDDED_UUID"
+          echo "Embedded application identifier: $EMBEDDED_APP_ID"
 
           if [ "$EMBEDDED_UUID" != "$PROFILE_UUID" ]; then
             echo "::error::Wrong provisioning profile was embedded"
@@ -625,19 +467,20 @@ jobs:
             -exportPath "$EXPORT_PATH" \
             -exportOptionsPlist "$EXPORT_OPTIONS"
 
-      - name: Stage signed IPA
+      - name: Stage IPA
         run: |
           set -euo pipefail
 
           IPA_FILE="$(
             find "$EXPORT_PATH" \
               -type f \
-              -name "*.ipa" |
-            head -n 1
+              -name "*.ipa" \
+              | head -n 1
           )"
 
           if [ -z "$IPA_FILE" ]; then
             echo "::error::No IPA was produced"
+            find "$EXPORT_PATH" -maxdepth 3 -type f || true
             exit 1
           fi
 
@@ -646,15 +489,166 @@ jobs:
           cp "$IPA_FILE" \
             output/ShadowPlay.ipa
 
+          echo "Signed IPA:"
           ls -lh output/ShadowPlay.ipa
 
-      - name: Upload signed iOS artifact
+      - name: Upload Actions artifact
         uses: actions/upload-artifact@v7
         with:
           name: ShadowPlay-signed-iOS
           path: output/ShadowPlay.ipa
           if-no-files-found: error
           retention-days: 7
+
+      - name: Publish latest OTA release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if gh release view latest >/dev/null 2>&1; then
+            echo "Updating existing latest release"
+          else
+            gh release create latest \
+              --title "ShadowPlay iOS OTA" \
+              --notes "Latest signed ShadowPlay iOS OTA build." \
+              --target "$GITHUB_SHA"
+          fi
+
+          gh release upload latest \
+            output/ShadowPlay.ipa \
+            --clobber
+
+      - name: Generate OTA manifest
+        run: |
+          set -euo pipefail
+
+          mkdir -p docs
+
+          VERSION_LINE="$(
+            grep '^version:' flutter/pubspec.yaml \
+            | head -n 1 \
+            | awk '{print $2}'
+          )"
+
+          APP_VERSION="${VERSION_LINE%%+*}"
+
+          if [[ "$VERSION_LINE" == *"+"* ]]; then
+            BUILD_NUMBER="${VERSION_LINE##*+}"
+          else
+            BUILD_NUMBER="1"
+          fi
+
+          if [ -z "$APP_VERSION" ]; then
+            APP_VERSION="1.0.0"
+          fi
+
+          if [ -z "$BUILD_NUMBER" ]; then
+            BUILD_NUMBER="1"
+          fi
+
+          cat > docs/manifest.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>items</key>
+              <array>
+                  <dict>
+                      <key>assets</key>
+                      <array>
+                          <dict>
+                              <key>kind</key>
+                              <string>software-package</string>
+
+                              <key>url</key>
+                              <string>https://github.com/aoyn1xw/ShadowPlay/releases/download/latest/ShadowPlay.ipa</string>
+                          </dict>
+                      </array>
+
+                      <key>metadata</key>
+                      <dict>
+                          <key>bundle-identifier</key>
+                          <string>$BUNDLE_ID</string>
+
+                          <key>bundle-version</key>
+                          <string>$BUILD_NUMBER</string>
+
+                          <key>kind</key>
+                          <string>software</string>
+
+                          <key>title</key>
+                          <string>ShadowPlay</string>
+                      </dict>
+                  </dict>
+              </array>
+          </dict>
+          </plist>
+          EOF
+
+          plutil -lint docs/manifest.plist
+
+          echo "Version: $APP_VERSION"
+          echo "Build number: $BUILD_NUMBER"
+
+      - name: Publish updated OTA manifest
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet -- docs/manifest.plist; then
+            echo "Manifest already up to date"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add docs/manifest.plist
+
+          git commit \
+            -m "chore: update iOS OTA manifest"
+
+          git push
+
+      - name: Verify OTA endpoints
+        run: |
+          set -euo pipefail
+
+          sleep 5
+
+          IPA_URL="https://github.com/aoyn1xw/ShadowPlay/releases/download/latest/ShadowPlay.ipa"
+          MANIFEST_URL="https://aoyn1xw.github.io/ShadowPlay/manifest.plist"
+
+          echo "Checking IPA..."
+          curl \
+            --fail \
+            --location \
+            --silent \
+            --show-error \
+            --head \
+            "$IPA_URL"
+
+          echo "Checking manifest..."
+          curl \
+            --fail \
+            --location \
+            --silent \
+            --show-error \
+            "$MANIFEST_URL" \
+            >/dev/null
+
+          echo "OTA endpoints available"
+
+      - name: Print install information
+        run: |
+          echo "Install page:"
+          echo "https://aoyn1xw.github.io/ShadowPlay/"
+
+          echo "Manifest:"
+          echo "https://aoyn1xw.github.io/ShadowPlay/manifest.plist"
+
+          echo "Signed IPA:"
+          echo "https://github.com/aoyn1xw/ShadowPlay/releases/download/latest/ShadowPlay.ipa"
 
       - name: Clean up signing files
         if: always()
@@ -673,137 +667,3 @@ jobs:
           rm -f "$RUNNER_TEMP/profile.plist"
           rm -f "$RUNNER_TEMP/embedded-profile.plist"
           rm -f "$RUNNER_TEMP/ExportOptions.plist"
-
-
-  release:
-    name: Publish Release Assets
-
-    if: >
-      startsWith(github.ref, 'refs/tags/v') ||
-      github.event_name == 'workflow_dispatch' ||
-      (
-        github.event_name == 'push' &&
-        github.ref == 'refs/heads/main'
-      )
-
-    needs:
-      - windows
-      - flutter-android
-      - ios-signed
-
-    runs-on: ubuntu-latest
-
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ShadowPlay-win-x64
-          path: release-assets/win-x64
-
-      - name: Download Android artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ShadowPlay-Flutter-android-debug
-          path: release-assets/android
-
-      - name: Download signed iOS artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ShadowPlay-signed-iOS
-          path: release-assets/ios
-
-      - name: Prepare release files
-        run: |
-          set -euo pipefail
-
-          mkdir -p dist
-
-          cd release-assets/win-x64
-          zip -qry ../../dist/ShadowPlay-win-x64.zip .
-          cd ../..
-
-          APK_FILE="$(
-            find release-assets/android \
-              -name "*.apk" |
-            head -n 1
-          )"
-
-          if [ -z "$APK_FILE" ]; then
-            echo "::error::Android APK not found"
-            exit 1
-          fi
-
-          cp "$APK_FILE" \
-            dist/ShadowPlay-Android-debug.apk
-
-          IPA_FILE="$(
-            find release-assets/ios \
-              -name "*.ipa" |
-            head -n 1
-          )"
-
-          if [ -z "$IPA_FILE" ]; then
-            echo "::error::Signed iOS IPA not found"
-            exit 1
-          fi
-
-          cp "$IPA_FILE" \
-            dist/ShadowPlay.ipa
-
-          echo "Release files:"
-          ls -lh dist
-
-      - name: Create or update tagged release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-
-      - name: Create or update latest release
-        if: >
-          github.ref == 'refs/heads/main' &&
-          (
-            github.event_name == 'push' ||
-            github.event_name == 'workflow_dispatch'
-          )
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
-          Automated latest build from \`main\` commit \`${GITHUB_SHA}\`.
-
-          ### Downloads
-
-          - **Windows Desktop:** \`ShadowPlay-win-x64.zip\`
-          - **Android:** \`ShadowPlay-Android-debug.apk\`
-          - **iOS OTA / Ad Hoc:** \`ShadowPlay.ipa\`
-
-          The signed iOS build can only be installed on devices included in its provisioning profile.
-          EOF
-
-          if gh release view latest >/dev/null 2>&1; then
-            gh release edit latest \
-              --title "ShadowPlay (Latest Build)" \
-              --notes-file "$RUNNER_TEMP/release-notes.md"
-          else
-            gh release create latest \
-              --title "ShadowPlay (Latest Build)" \
-              --notes-file "$RUNNER_TEMP/release-notes.md" \
-              --target "$GITHUB_SHA"
-          fi
-
-          for file in dist/*; do
-            gh release upload latest \
-              "$file" \
-              --clobber
-          done
