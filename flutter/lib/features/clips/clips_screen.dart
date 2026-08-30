@@ -28,12 +28,16 @@ class _ClipsScreenState extends State<ClipsScreen> {
     final failures = selected
         .where((clip) => widget.state.downloadFailures.containsKey(clip.id))
         .length;
+    final galleryFailures = selected
+        .where((clip) => widget.state.gallerySaveFailures.containsKey(clip.id))
+        .length;
+    final message = failures > 0
+        ? '$failures ${failures == 1 ? 'download' : 'downloads'} failed. Tap the clip to retry.'
+        : galleryFailures > 0
+            ? 'Downloaded, but $galleryFailures clip${galleryFailures == 1 ? '' : 's'} could not be saved to Photos/Gallery. You can retry from Home.'
+            : 'Download complete. Clips were saved to Home and Photos/Gallery.';
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(failures == 0
-            ? 'Download complete. Your clips are now in Home.'
-            : '$failures ${failures == 1 ? 'download' : 'downloads'} failed. Tap the clip to retry.'),
-      ),
+      SnackBar(content: Text(message)),
     );
   }
 
