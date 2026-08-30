@@ -1,0 +1,203 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore ShadowPlay.sln
+
+      - name: Build
+        run: dotnet build ShadowPlay.sln -c Release --no-restore
+
+      - name: Test
+        run: >
+          dotnet test ShadowPlay.sln -c Release --no-build
+          --collect:"XPlat Code Coverage"
+          --results-directory TestResults
+
+      - name: Upload .NET coverage
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: codecov/codecov-action@v5
+        with:
+          files: TestResults/**/coverage.cobertura.xml
+          flags: dotnet
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Publish
+        run: >
+          dotnet publish
+          src/ShadowPlay.Windows/ShadowPlay.Windows.csproj
+          -c Release
+          -r win-x64
+          --self-contained false
+          -o publish/win-x64
+
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $clips = Join-Path $env:RUNNER_TEMP "smoke-clips"
+          New-Item -ItemType Directory -Force -Path $clips | Out-Null
+
+          $bytes = New-Object byte[] 40960
+          (New-Object Random 1).NextBytes($bytes)
+
+          [IO.File]::WriteAllBytes(
+            (Join-Path $clips "clip_a.mp4"),
+            $bytes
+          )
+
+          [IO.File]::WriteAllBytes(
+            (Join-Path $clips "clip_b.mp4"),
+            $bytes[0..8191]
+          )
+
+          $out = & ".\publish\win-x64\ShadowPlay.exe" `
+            --smoke `
+            --folder $clips `
+            --port 0 `
+            --smoke-seconds 12 |
+            Out-String
+
+          Write-Host $out
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "smoke run exited with $LASTEXITCODE"
+          }
+
+          if ($out -notmatch 'SMOKE_OK') {
+            throw "health never became ready"
+          }
+
+          if ($out -notmatch '"clips":2') {
+            throw "expected 2 clips to be detected"
+          }
+
+  flutter-checks:
+    name: Flutter checks
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: flutter
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test --coverage
+
+      - name: Upload Flutter coverage
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: codecov/codecov-action@v5
+        with:
+          files: flutter/coverage/lcov.info
+          flags: flutter
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  android:
+    name: Android build
+    needs: flutter-checks
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: flutter
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: true
+
+      - name: Precache Android artifacts
+        run: flutter precache --android
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+  ios:
+    name: iOS compile
+    needs: flutter-checks
+    runs-on: macos-15
+
+    defaults:
+      run:
+        working-directory: flutter
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: true
+
+      - name: Precache iOS artifacts
+        run: flutter precache --ios
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Build unsigned iOS app
+        run: flutter build ios --release --no-codesign
