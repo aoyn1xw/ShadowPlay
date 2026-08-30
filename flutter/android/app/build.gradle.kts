@@ -6,7 +6,10 @@ plugins {
 
 android {
     namespace = "com.ayon1xw.shadowplay"
-    compileSdk = flutter.compileSdkVersion
+    // flutter_secure_storage 11 requires Android API 37 for compilation.
+    // Keep minSdk and targetSdk on Flutter's defaults; compileSdk only controls
+    // which Android APIs are available while compiling the app.
+    compileSdk = maxOf(flutter.compileSdkVersion, 37)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

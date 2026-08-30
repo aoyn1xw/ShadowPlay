@@ -163,6 +163,37 @@ jobs:
       - name: Precache Android artifacts
         run: flutter precache --android
 
+      - name: Install Android API 37
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if command -v sdkmanager >/dev/null 2>&1; then
+            sdkmanager_path="$(command -v sdkmanager)"
+          else
+            sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+
+            if [ -z "$sdk_root" ]; then
+              echo "::error::ANDROID_SDK_ROOT and ANDROID_HOME are not set"
+              exit 1
+            fi
+
+            sdkmanager_path="$(
+              find "$sdk_root/cmdline-tools" \
+                -type f \
+                -name sdkmanager \
+                -print \
+                -quit
+            )"
+          fi
+
+          if [ -z "$sdkmanager_path" ]; then
+            echo "::error::Android sdkmanager was not found"
+            exit 1
+          fi
+
+          "$sdkmanager_path" "platforms;android-37.0"
+
       - name: Resolve dependencies
         run: flutter pub get
 
