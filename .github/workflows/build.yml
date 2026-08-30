@@ -802,8 +802,48 @@ jobs:
               --target "$GITHUB_SHA"
           fi
 
+          RELEASE_ID="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/tags/latest" \
+              --jq '.id'
+          )"
+
+          if [ -z "$RELEASE_ID" ]; then
+            echo "::error::Could not resolve the latest release id"
+            exit 1
+          fi
+
           for file in dist/*; do
-            gh release upload latest \
-              "$file" \
-              --clobber
+            asset_name="$(basename "$file")"
+
+            uploaded=false
+            for attempt in 1 2 3; do
+              # Delete matching assets explicitly before every attempt. This
+              # avoids a GitHub API 422 when a previous attempt or run left
+              # an asset with the same name.
+              gh api --paginate \
+                "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" \
+                --jq ".[] | select(.name == \"${asset_name}\") | .id" |
+              while IFS= read -r asset_id; do
+                if [ -n "$asset_id" ]; then
+                  gh api \
+                    --method DELETE \
+                    "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
+                fi
+              done
+
+              if gh release upload latest "$file"; then
+                uploaded=true
+                break
+              fi
+
+              if [ "$attempt" -lt 3 ]; then
+                sleep "$((attempt * 2))"
+              fi
+            done
+
+            if [ "$uploaded" != true ]; then
+              echo "::error::Failed to upload release asset: ${asset_name}"
+              exit 1
+            fi
           done
