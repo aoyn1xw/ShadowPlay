@@ -13,8 +13,9 @@ byte-for-byte recordings.
 > **Status:** Windows desktop app (MVP) implemented, plus a cross-platform Flutter mobile client
 > under [`flutter/`](flutter/README.md).
 >
-> **CI:** every push/PR builds artifacts on GitHub Actions —
-> Windows exe (`ShadowPlay-win-x64`), Android debug APK (`ShadowPlay-Flutter-android-debug`), and unsigned iOS IPA (`ShadowPlay-Flutter-ios-unsigned`).
+> **CI:** pull requests run Windows, Flutter, Android, and unsigned iOS checks. Version tags
+> (`v*`) publish Windows and Android release assets. Signed iOS OTA builds run separately from
+> [`ios-ota.yml`](.github/workflows/ios-ota.yml).
 
 ---
 
@@ -227,6 +228,24 @@ dotnet publish src/ShadowPlay.Windows -c Release -r win-x64 --self-contained tru
   -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish-single
 ```
 
+## GitHub Actions
+
+The workflows are separated by purpose:
+
+- [`ci.yml`](.github/workflows/ci.yml) runs on pull requests and manual dispatch. It owns the
+  Windows build/test/smoke check, shared Flutter dependency/analyze/test validation, Android
+  debug compilation, and unsigned iOS compilation. PR CI does not use iOS signing secrets.
+- [`release.yml`](.github/workflows/release.yml) runs for version tags matching `v*`. It builds
+  the Windows release and Android release APK, then creates or updates the tagged GitHub Release.
+- [`ios-ota.yml`](.github/workflows/ios-ota.yml) runs through manual dispatch, keeping signed
+  builds out of ordinary `main` pushes. It owns certificate/profile installation, signed iOS OTA
+  export, the `latest` OTA release, and the OTA manifest.
+- [`codeql.yml`](.github/workflows/codeql.yml) remains a separate CodeQL analysis workflow.
+
+CI keeps the normal debug and unsigned build outputs inside their jobs rather than uploading them
+as routine artifacts. The Android release job currently uses the existing project signing
+configuration; configure a release keystore separately before treating that APK as store-ready.
+
 ## Data locations
 
 | What | Where |
@@ -262,7 +281,10 @@ flutter/
   lib/                  Cross-platform mobile client (Home, Clips, Player, Settings, Onboarding)
   test/                 Unit and widget test suites
 .github/workflows/
-  build.yml             Builds Windows exe, Android debug APK, and unsigned iOS IPA on push/PR
+  ci.yml                Pull-request validation and manual checks
+  release.yml           Windows and Android assets for version tags
+  ios-ota.yml           Signed iOS OTA build and distribution
+  codeql.yml            Separate CodeQL analysis
 ```
 
 ## Cross-platform mobile client
