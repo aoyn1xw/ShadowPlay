@@ -60,7 +60,13 @@ public static class LanApiFactory
             {
                 var logger = context.RequestServices.GetRequiredService<ILoggerFactory>()
                     .CreateLogger("ShadowPlay.Api");
-                logger.LogError(ex, "Unhandled API error on {Method} {Path}", context.Request.Method, context.Request.Path);
+                var requestMethod = context.Request.Method
+                    .Replace("\r", "\\r", StringComparison.Ordinal)
+                    .Replace("\n", "\\n", StringComparison.Ordinal);
+                var requestPath = (context.Request.Path.Value ?? string.Empty)
+                    .Replace("\r", "\\r", StringComparison.Ordinal)
+                    .Replace("\n", "\\n", StringComparison.Ordinal);
+                logger.LogError(ex, "Unhandled API error on {Method} {Path}", requestMethod, requestPath);
 
                 if (!context.Response.HasStarted)
                 {
@@ -88,11 +94,19 @@ public static class LanApiFactory
 
             var logger = context.RequestServices.GetRequiredService<ILoggerFactory>()
                 .CreateLogger("ShadowPlay.Api.Network");
-            var remote = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            var requestMethod = context.Request.Method
+                .Replace("\r", "\\r", StringComparison.Ordinal)
+                .Replace("\n", "\\n", StringComparison.Ordinal);
+            var requestPath = (context.Request.Path.Value ?? string.Empty)
+                .Replace("\r", "\\r", StringComparison.Ordinal)
+                .Replace("\n", "\\n", StringComparison.Ordinal);
+            var remote = (context.Connection.RemoteIpAddress?.ToString() ?? "unknown")
+                .Replace("\r", "\\r", StringComparison.Ordinal)
+                .Replace("\n", "\\n", StringComparison.Ordinal);
             logger.LogInformation(
                 "Incoming LAN request {Method} {Path} from {RemoteIp}",
-                context.Request.Method,
-                context.Request.Path,
+                requestMethod,
+                requestPath,
                 remote);
 
             try
@@ -103,8 +117,8 @@ public static class LanApiFactory
             {
                 logger.LogInformation(
                     "Completed LAN request {Method} {Path} from {RemoteIp} with HTTP {StatusCode}",
-                    context.Request.Method,
-                    context.Request.Path,
+                    requestMethod,
+                    requestPath,
                     remote,
                     context.Response.StatusCode);
             }
