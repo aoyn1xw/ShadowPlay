@@ -47,6 +47,8 @@ public sealed class LanApiTests : IAsyncLifetime, IDisposable
             Pairing = _pairing,
             Devices = _devices,
             ServerInfo = new StaticServerInfo("test-server-id", "TEST-PC"),
+            ClipPreview = new TestClipPreviewProvider(),
+            ServerVersion = "test-server-version",
             Port = 0,
         };
 
@@ -90,7 +92,7 @@ public sealed class LanApiTests : IAsyncLifetime, IDisposable
     private HttpClient AuthenticatedClient(string token) =>
         new() { BaseAddress = new Uri(_baseAddress), DefaultRequestHeaders = { Authorization = new("Bearer", token) } };
 
-    private string AddClip(string name, int sizeBytes = 4096, int seed = 0, double lastWriteOffsetMinutes = -1)
+    private string AddClip(string name, int sizeBytes = 4096, int seed = 0, double lastWriteOffsetMinutes = -1, TimeSpan? duration = null)
     {
         var path = _folder.CreateMp4(name, sizeBytes);
         var bytes = new byte[sizeBytes];
@@ -108,7 +110,8 @@ public sealed class LanApiTests : IAsyncLifetime, IDisposable
             Path.GetFileName(path),
             path,
             sizeBytes,
-            lastWrite);
+            lastWrite,
+            duration);
         _catalog.AddOrUpdate(entry);
         return entry.Id;
     }
@@ -125,6 +128,10 @@ public sealed class LanApiTests : IAsyncLifetime, IDisposable
         Assert.Equal("ok", body.GetProperty("status").GetString());
         Assert.Equal("test-server-id", body.GetProperty("serverId").GetString());
         Assert.Equal(1, body.GetProperty("protocolVersion").GetInt32());
+        Assert.Equal(1, body.GetProperty("apiVersion").GetInt32());
+        Assert.Equal("test-server-version", body.GetProperty("serverVersion").GetString());
+        Assert.Contains("clips.rangePlayback", body.GetProperty("capabilities").EnumerateArray().Select(x => x.GetString()));
+        Assert.Contains("clips.thumbnails", body.GetProperty("capabilities").EnumerateArray().Select(x => x.GetString()));
     }
 
     [Fact]
@@ -236,6 +243,39 @@ public sealed class LanApiTests : IAsyncLifetime, IDisposable
         Assert.DoesNotContain(_folder.Path, raw, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("fullPath", raw, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("path\"", raw, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Clip_metadata_includes_duration_and_thumbnail_url_without_paths()
+    {
+        var (token, _) = await PairAsync();
+        var id = AddClip("metadata.mp4", duration: TimeSpan.FromSeconds(12.5));
+
+        using var client = AuthenticatedClient(token);
+        var response = await client.GetAsync("/api/v1/clips");
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var clip = body.EnumerateArray().Single(item => item.GetProperty("id").GetString() == id);
+
+        Assert.Equal(12500, clip.GetProperty("durationMilliseconds").GetInt64());
+        Assert.Equal($"/api/v1/clips/{id}/thumbnail", clip.GetProperty("thumbnailUrl").GetString());
+        Assert.DoesNotContain(_folder.Path, clip.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Thumbnail_requires_authentication_and_returns_png_bytes()
+    {
+        var (token, _) = await PairAsync();
+        var id = AddClip("thumbnail.mp4");
+
+        var anonymous = await _client.GetAsync($"/api/v1/clips/{id}/thumbnail");
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+
+        using var client = AuthenticatedClient(token);
+        var response = await client.GetAsync($"/api/v1/clips/{id}/thumbnail");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("image/png", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(new byte[] { 137, 80, 78, 71 }, (await response.Content.ReadAsByteArrayAsync()).Take(4).ToArray());
     }
 
     [Fact]
@@ -367,5 +407,14 @@ public sealed class LanApiTests : IAsyncLifetime, IDisposable
         public string ComputerName { get; } = computerName;
 
         public DateTimeOffset StartedUtc { get; } = DateTimeOffset.UtcNow;
+    }
+
+    private sealed class TestClipPreviewProvider : IClipPreviewProvider
+    {
+        public bool SupportsThumbnails => true;
+
+        public TimeSpan? GetDuration(string fullPath) => null;
+
+        public byte[] GetThumbnail(ClipEntry entry) => [137, 80, 78, 71];
     }
 }

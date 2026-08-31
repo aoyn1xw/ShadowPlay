@@ -45,6 +45,114 @@ void main() {
     expect(connection.toJson()['serverId'], 'server-1');
   });
 
+  test('clip and server metadata remain backward compatible', () {
+    final clip = Clip.fromJson({
+      'id': List.filled(64, 'a').join(),
+      'fileName': 'Ace.mp4',
+      'sizeBytes': 1000,
+      'lastWriteTimeUtc': '2026-08-28T14:30:00Z',
+      'durationMilliseconds': 12500,
+      'thumbnailUrl': '/api/v1/clips/thumbnail',
+    });
+    final oldServer = ServerInfo.fromJson({
+      'serverId': 'server-1',
+      'computerName': 'PC 1',
+      'clipCount': 1,
+      'protocolVersion': 1,
+    });
+
+    expect(clip.duration, const Duration(milliseconds: 12500));
+    expect(clip.thumbnailUrl, '/api/v1/clips/thumbnail');
+    expect(oldServer.serverVersion, isNull);
+    expect(oldServer.apiVersion, 1);
+    expect(oldServer.capabilities, isEmpty);
+    expect(oldServer.supports('clips.thumbnails'), isFalse);
+  });
+
+  test('newer server API versions are rejected clearly', () async {
+    final client = MockClient((_) async => http.Response(
+          jsonEncode({
+            'status': 'ok',
+            'serverId': 'server-1',
+            'computerName': 'PC 1',
+            'clipCount': 0,
+            'apiVersion': 2,
+          }),
+          200,
+        ));
+
+    final api = ShadowPlayApi(
+      Connection(
+        serverId: 'server-1',
+        computerName: 'PC 1',
+        address: '192.168.1.20',
+        port: 5177,
+      ),
+      'token',
+    );
+
+    // Compatibility is checked during the pairing health preflight.
+    await expectLater(
+      ShadowPlayApi.pair(
+        address: '192.168.1.20',
+        port: 5177,
+        code: 'ABCD-1234',
+        deviceName: 'iPhone',
+        client: client,
+      ),
+      throwsA(
+        isA<ApiException>().having(
+          (error) => error.kind,
+          'kind',
+          ApiFailureKind.apiIncompatible,
+        ),
+      ),
+    );
+    final id = List.filled(64, 'a').join();
+    expect(
+        api
+            .clipStreamUri(Clip(
+              id: id,
+              fileName: 'Ace.mp4',
+              sizeBytes: 100,
+              lastWriteTimeUtc: DateTime.utc(2026, 8, 28),
+            ))
+            .path,
+        '/api/v1/clips/$id/download');
+  });
+
+  test('thumbnail requests reuse the authenticated API contract', () async {
+    final id = List.filled(64, 'b').join();
+    final client = MockClient((request) async {
+      expect(request.headers['authorization'], 'Bearer token');
+      expect(request.url.path, '/api/v1/clips/$id/thumbnail');
+      return http.Response.bytes([137, 80, 78, 71], 200);
+    });
+    final api = ShadowPlayApi(
+      Connection(
+        serverId: 'server-1',
+        computerName: 'PC 1',
+        address: '192.168.1.20',
+        port: 5177,
+      ),
+      'token',
+    );
+
+    expect(
+      await api.thumbnail(
+        Clip(
+          id: id,
+          fileName: 'Ace.mp4',
+          sizeBytes: 100,
+          lastWriteTimeUtc: DateTime.utc(2026, 8, 28),
+          thumbnailUrl: '/api/v1/clips/$id/thumbnail',
+        ),
+        client: client,
+      ),
+      [137, 80, 78, 71],
+    );
+  });
+
   test('onboarding stays complete only while at least one PC remains paired',
       () async {
     final preferences = await SharedPreferences.getInstance();
@@ -175,7 +283,8 @@ void main() {
       ),
       throwsA(
         isA<ApiException>()
-            .having((error) => error.kind, 'kind', ApiFailureKind.http)
+            .having(
+                (error) => error.kind, 'kind', ApiFailureKind.networkIsolation)
             .having((error) => error.statusCode, 'status', 403),
       ),
     );

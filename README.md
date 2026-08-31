@@ -169,7 +169,9 @@ curl http://192.168.1.20:5177/api/v1/pair/exchange \
 {
   "token": "k3Xc…(base64url, shown once)",
   "deviceId": "f2a9…",
-  "server": { "serverId": "b0c1…", "computerName": "GAMING-PC", "protocolVersion": 1 }
+  "server": { "serverId": "b0c1…", "computerName": "GAMING-PC", "protocolVersion": 1,
+    "serverVersion": "0.1.0", "apiVersion": 1,
+    "capabilities": ["clips.rangePlayback", "clips.duration", "clips.thumbnails"] }
 }
 ```
 
@@ -192,8 +194,16 @@ Clip metadata shape (no paths are ever exposed):
 
 ```json
 { "id": "3F2A…64 hex chars", "fileName": "Valorant_2026-08-24.mp4",
-  "sizeBytes": 482110412, "lastWriteTimeUtc": "2026-08-24T18:22:31Z" }
+  "sizeBytes": 482110412, "lastWriteTimeUtc": "2026-08-24T18:22:31Z",
+  "durationMilliseconds": 18400,
+  "thumbnailUrl": "/api/v1/clips/<id>/thumbnail" }
 ```
+
+The `lastWriteTimeUtc` field is the recording timestamp used by the desktop
+monitor. `durationMilliseconds` and `thumbnailUrl` are optional for older or
+unsupported media. The thumbnail endpoint is authenticated like the download
+endpoint. Clients can play directly from `/clips/<id>/download`; the existing
+HTTP Range support lets compatible players request only the needed bytes.
 
 ## Security model & limitations — read this
 

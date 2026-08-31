@@ -46,6 +46,7 @@ public sealed class AppController : IAsyncDisposable
     private readonly IPairingService _pairing;
     private readonly IDeviceRegistry _devices;
     private readonly IWindowsFirewallService _firewall;
+    private readonly IClipPreviewProvider _clipPreview;
     private readonly ILogger<AppController>? _logger;
 
     private WebApplication? _apiApp;
@@ -59,6 +60,7 @@ public sealed class AppController : IAsyncDisposable
         IPairingService pairing,
         IDeviceRegistry devices,
         IWindowsFirewallService firewall,
+        IClipPreviewProvider clipPreview,
         ILogger<AppController>? logger = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -67,6 +69,7 @@ public sealed class AppController : IAsyncDisposable
         _pairing = pairing ?? throw new ArgumentNullException(nameof(pairing));
         _devices = devices ?? throw new ArgumentNullException(nameof(devices));
         _firewall = firewall ?? throw new ArgumentNullException(nameof(firewall));
+        _clipPreview = clipPreview ?? throw new ArgumentNullException(nameof(clipPreview));
         _logger = logger;
 
         _catalog.Changed += () => StateChanged?.Invoke();
@@ -189,6 +192,7 @@ public sealed class AppController : IAsyncDisposable
                 Pairing = _pairing,
                 Devices = _devices,
                 ServerInfo = serverInfo,
+                ClipPreview = _clipPreview,
                 Port = data.Port,
             };
 
@@ -229,7 +233,8 @@ public sealed class AppController : IAsyncDisposable
                 () => _settings.Current.RecordingsFolder,
                 _catalog,
                 TimeProvider.System,
-                logger: _logger);
+                logger: _logger,
+                previewProvider: _clipPreview);
             _monitor.RootUnavailable += root =>
             {
                 SetStatus(new ControllerStatus(SharingState.Error, "The recordings folder is currently unavailable. Clips stay paused until it returns."));

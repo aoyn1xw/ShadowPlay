@@ -90,7 +90,7 @@ class HomeScreen extends StatelessWidget {
                     },
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
-                          builder: (_) => PlayerScreen(clip: clip)),
+                          builder: (_) => PlayerScreen.local(clip: clip)),
                     ),
                   );
                 },
@@ -168,7 +168,7 @@ class _DownloadedClipCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 11),
                 child: Text(
-                  formatClipDate(clip.lastWriteTimeUtc),
+                  '${clip.duration == null ? 'Duration unknown' : formatDuration(clip.duration!)} · ${formatBytes(clip.sizeBytes)} · ${formatClipDate(clip.lastWriteTimeUtc)}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(

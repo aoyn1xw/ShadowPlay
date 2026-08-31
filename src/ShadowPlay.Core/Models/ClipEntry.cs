@@ -9,7 +9,8 @@ public sealed record ClipEntry(
     string FileName,
     string FullPath,
     long SizeBytes,
-    DateTimeOffset LastWriteTimeUtc)
+    DateTimeOffset LastWriteTimeUtc,
+    TimeSpan? Duration = null)
 {
-    public ClipInfo ToInfo() => new(Id, FileName, SizeBytes, LastWriteTimeUtc);
+    public ClipInfo ToInfo() => new(Id, FileName, SizeBytes, LastWriteTimeUtc, Duration);
 }

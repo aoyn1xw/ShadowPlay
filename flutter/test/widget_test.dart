@@ -99,6 +99,7 @@ void main() {
           fileName: 'Valorant_Ace.mp4',
           sizeBytes: 184000000,
           lastWriteTimeUtc: DateTime.utc(2026, 8, 28, 14, 30),
+          duration: const Duration(seconds: 92),
         ),
         Clip(
           id: List.filled(64, 'b').join(),
@@ -114,6 +115,8 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('Clips'));
     await tester.pump();
+
+    expect(find.text('1:32'), findsOneWidget);
 
     await tester.tap(find.text('Valorant_Ace.mp4'));
     await tester.pump();

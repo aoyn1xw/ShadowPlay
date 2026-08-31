@@ -25,6 +25,9 @@ public static class LanApiEndpoints
         {
             status = "ok",
             serverId = options.ServerInfo.ServerId,
+            serverVersion = options.ServerVersion,
+            apiVersion = LanApiOptions.ApiVersion,
+            capabilities = options.Capabilities,
             protocolVersion = QrPayload.CurrentProtocolVersion,
             timeUtc = DateTimeOffset.UtcNow,
         }));
@@ -61,28 +64,18 @@ public static class LanApiEndpoints
                 return Results.Ok(new PairExchangeResponse(
                     result.BearerToken!,
                     result.Device!.DeviceId,
-                    new ServerDto(
-                        options.ServerInfo.ServerId,
-                        options.ServerInfo.ComputerName,
-                        QrPayload.CurrentProtocolVersion,
-                        options.ServerInfo.StartedUtc,
-                        options.Catalog.GetClips().Count)));
+                    ToServerDto(options)));
             })
             .WithMetadata(new RequestSizeLimitAttribute(4096));
 
         // ---- Authenticated (middleware enforces bearer tokens) ---------------
 
-        api.MapGet("/server", () => Results.Ok(new ServerDto(
-            options.ServerInfo.ServerId,
-            options.ServerInfo.ComputerName,
-            QrPayload.CurrentProtocolVersion,
-            options.ServerInfo.StartedUtc,
-            options.Catalog.GetClips().Count)));
+        api.MapGet("/server", () => Results.Ok(ToServerDto(options)));
 
         api.MapGet("/clips", () =>
         {
             var clips = options.Catalog.GetClips();
-            return Results.Ok(clips.Select(c => c.ToInfo()).Select(ToDto));
+            return Results.Ok(clips.Select(c => ToDto(c.ToInfo(), options)));
         });
 
         api.MapGet("/clips/{id}", (string id) =>
@@ -93,8 +86,27 @@ public static class LanApiEndpoints
             }
 
             return options.Catalog.Find(id) is { } entry
-                ? Results.Ok(ToDto(entry.ToInfo()))
+                ? Results.Ok(ToDto(entry.ToInfo(), options))
                 : Results.NotFound(new { error = "clip_not_found" });
+        });
+
+        api.MapGet("/clips/{id}/thumbnail", (string id) =>
+        {
+            if (!IsValidClipId(id))
+            {
+                return Results.NotFound(new { error = "clip_not_found" });
+            }
+
+            var entry = options.Catalog.Find(id);
+            if (entry is null || options.ClipPreview?.SupportsThumbnails != true)
+            {
+                return Results.NotFound(new { error = "thumbnail_not_available" });
+            }
+
+            var thumbnail = options.ClipPreview.GetThumbnail(entry);
+            return thumbnail is { Length: > 0 }
+                ? Results.File(thumbnail, "image/png", lastModified: entry.LastWriteTimeUtc)
+                : Results.NotFound(new { error = "thumbnail_not_available" });
         });
 
         api.MapGet("/clips/{id}/download", (string id) =>
@@ -128,7 +140,25 @@ public static class LanApiEndpoints
         return app;
     }
 
-    private static ClipDto ToDto(ClipInfo info) => new(info.Id, info.FileName, info.SizeBytes, info.LastWriteTimeUtc);
+    private static ClipDto ToDto(ClipInfo info, LanApiOptions options) => new(
+        info.Id,
+        info.FileName,
+        info.SizeBytes,
+        info.LastWriteTimeUtc,
+        info.Duration is { } duration ? (long)duration.TotalMilliseconds : null,
+        options.ClipPreview?.SupportsThumbnails == true
+            ? $"{BasePath}/clips/{info.Id}/thumbnail"
+            : null);
+
+    private static ServerDto ToServerDto(LanApiOptions options) => new(
+        options.ServerInfo.ServerId,
+        options.ServerInfo.ComputerName,
+        QrPayload.CurrentProtocolVersion,
+        options.ServerInfo.StartedUtc,
+        options.Catalog.GetClips().Count,
+        options.ServerVersion,
+        LanApiOptions.ApiVersion,
+        options.Capabilities);
 
     /// <summary>
     /// Clip IDs are 64 hex characters. Anything else (including path-like input)

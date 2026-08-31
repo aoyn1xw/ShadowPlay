@@ -5,11 +5,23 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../core/models.dart';
+import '../../core/shadowplay_api.dart';
 import '../../shared/widgets.dart';
 
 class PlayerScreen extends StatefulWidget {
-  const PlayerScreen({required this.clip, super.key});
-  final DownloadedClip clip;
+  PlayerScreen.local({required DownloadedClip clip, super.key})
+      : clip = clip.asRemoteClip(),
+        localPath = clip.localPath,
+        api = null;
+
+  const PlayerScreen.remote({required this.clip, required this.api, super.key})
+      : localPath = null;
+
+  final Clip clip;
+  final String? localPath;
+  final ShadowPlayApi? api;
+
+  bool get isRemote => api != null;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -24,7 +36,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.file(File(widget.clip.localPath));
+    final path = widget.localPath;
+    _controller = path != null
+        ? VideoPlayerController.file(File(path))
+        : VideoPlayerController.networkUrl(
+            widget.api!.clipStreamUri(widget.clip),
+            httpHeaders: widget.api!.authorizationHeaders,
+          );
     _initialized = _controller.initialize().then((_) {
       if (!mounted) return;
       _controller.addListener(_videoChanged);
@@ -79,11 +97,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
           future: _initialized,
           builder: (context, snapshot) {
             if (snapshot.hasError) {
-              return const Center(
+              return Center(
                 child: EmptyState(
                   icon: Icons.broken_image_outlined,
-                  title: 'Cannot play this clip',
-                  message: 'The downloaded file may be missing or unsupported.',
+                  title: widget.isRemote
+                      ? 'PC clip is unavailable'
+                      : 'Cannot play this clip',
+                  message: widget.isRemote
+                      ? 'The PC may be offline or the clip may no longer be available. Check the connection and try again.'
+                      : 'The downloaded file may be missing or unsupported.',
+                  action: widget.isRemote
+                      ? FilledButton.tonal(
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: const Text('Back to clips'),
+                        )
+                      : null,
                 ),
               );
             }

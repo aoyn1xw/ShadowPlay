@@ -1,10 +1,12 @@
 import 'dart:ui' as ui;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import '../../core/app_state.dart';
 import '../../core/models.dart';
 import '../../shared/widgets.dart';
+import '../player/player_screen.dart';
 
 class ClipsScreen extends StatefulWidget {
   const ClipsScreen({required this.state, super.key});
@@ -117,6 +119,7 @@ class _ClipsScreenState extends State<ClipsScreen> {
           final selected = _selectedIds.contains(clip.id);
           return _RemoteClipCard(
             clip: clip,
+            loadThumbnail: widget.state.loadThumbnail,
             selected: selected,
             progress: widget.state.downloadProgress[clip.id],
             downloading: widget.state.downloadProgress.containsKey(clip.id),
@@ -128,6 +131,15 @@ class _ClipsScreenState extends State<ClipsScreen> {
                 _selectedIds.remove(clip.id);
               }
             }),
+            onPlay: () {
+              final api = widget.state.api;
+              if (api == null) return;
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => PlayerScreen.remote(clip: clip, api: api),
+                ),
+              );
+            },
           );
         },
       ),
@@ -138,19 +150,23 @@ class _ClipsScreenState extends State<ClipsScreen> {
 class _RemoteClipCard extends StatelessWidget {
   const _RemoteClipCard({
     required this.clip,
+    required this.loadThumbnail,
     required this.selected,
     required this.downloading,
     required this.onTap,
+    required this.onPlay,
     this.progress,
     this.failed,
   });
 
   final Clip clip;
+  final Future<Uint8List?> Function(Clip clip) loadThumbnail;
   final bool selected;
   final bool downloading;
   final double? progress;
   final String? failed;
   final VoidCallback onTap;
+  final VoidCallback onPlay;
 
   @override
   Widget build(BuildContext context) {
@@ -174,8 +190,20 @@ class _RemoteClipCard extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  ClipPoster(
-                      badge: formatBytes(clip.sizeBytes), selected: selected),
+                  _RemoteThumbnail(
+                    clip: clip,
+                    loadThumbnail: loadThumbnail,
+                    selected: selected,
+                  ),
+                  Positioned(
+                    left: 6,
+                    top: 6,
+                    child: IconButton.filledTonal(
+                      tooltip: 'Play from PC',
+                      onPressed: downloading ? null : onPlay,
+                      icon: const Icon(Icons.play_arrow),
+                    ),
+                  ),
                   if (downloading)
                     ColoredBox(
                       color: Colors.black45,
@@ -210,7 +238,7 @@ class _RemoteClipCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
               child: Text(
                 failed == null
-                    ? formatClipDate(clip.lastWriteTimeUtc)
+                    ? '${clip.duration == null ? 'Duration unknown' : formatDuration(clip.duration!)} · ${formatBytes(clip.sizeBytes)} · ${formatClipDate(clip.lastWriteTimeUtc)}'
                     : 'Download failed · tap to retry',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -226,6 +254,107 @@ class _RemoteClipCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _RemoteThumbnail extends StatefulWidget {
+  const _RemoteThumbnail({
+    required this.clip,
+    required this.loadThumbnail,
+    required this.selected,
+  });
+
+  final Clip clip;
+  final Future<Uint8List?> Function(Clip clip) loadThumbnail;
+  final bool selected;
+
+  @override
+  State<_RemoteThumbnail> createState() => _RemoteThumbnailState();
+}
+
+class _RemoteThumbnailState extends State<_RemoteThumbnail> {
+  late Future<Uint8List?> _thumbnail;
+
+  @override
+  void initState() {
+    super.initState();
+    _thumbnail = widget.loadThumbnail(widget.clip);
+  }
+
+  @override
+  void didUpdateWidget(covariant _RemoteThumbnail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.clip.id != widget.clip.id ||
+        oldWidget.clip.sizeBytes != widget.clip.sizeBytes ||
+        oldWidget.clip.lastWriteTimeUtc != widget.clip.lastWriteTimeUtc) {
+      _thumbnail = widget.loadThumbnail(widget.clip);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Uint8List?>(
+        future: _thumbnail,
+        builder: (context, snapshot) {
+          final bytes = snapshot.data;
+          if (bytes == null || bytes.isEmpty) {
+            return ClipPoster(
+              badge: widget.clip.duration == null
+                  ? formatBytes(widget.clip.sizeBytes)
+                  : formatDuration(widget.clip.duration!),
+              selected: widget.selected,
+            );
+          }
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true),
+              if (widget.selected)
+                ColoredBox(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.13)),
+              Positioned(
+                right: 8,
+                bottom: 8,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    child: Text(
+                      widget.clip.duration == null
+                          ? formatBytes(widget.clip.sizeBytes)
+                          : formatDuration(widget.clip.duration!),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ),
+              if (widget.selected)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Padding(
+                      padding: EdgeInsets.all(4),
+                      child: Icon(Icons.check, color: Colors.white, size: 16),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+      );
 }
 
 class SelectionActionBar extends StatelessWidget {

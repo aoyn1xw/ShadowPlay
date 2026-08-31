@@ -6,6 +6,8 @@ class Clip {
     required this.fileName,
     required this.sizeBytes,
     required this.lastWriteTimeUtc,
+    this.duration,
+    this.thumbnailUrl,
   });
 
   factory Clip.fromJson(Map<String, dynamic> json) => Clip(
@@ -13,12 +15,16 @@ class Clip {
         fileName: json['fileName'] as String,
         sizeBytes: (json['sizeBytes'] as num).toInt(),
         lastWriteTimeUtc: DateTime.parse(json['lastWriteTimeUtc'] as String),
+        duration: _durationFromJson(json['durationMilliseconds']),
+        thumbnailUrl: json['thumbnailUrl'] as String?,
       );
 
   final String id;
   final String fileName;
   final int sizeBytes;
   final DateTime lastWriteTimeUtc;
+  final Duration? duration;
+  final String? thumbnailUrl;
 }
 
 class ServerInfo {
@@ -26,17 +32,32 @@ class ServerInfo {
     required this.serverId,
     required this.computerName,
     required this.clipCount,
+    this.serverVersion,
+    this.apiVersion = 1,
+    this.capabilities = const {},
   });
 
   factory ServerInfo.fromJson(Map<String, dynamic> json) => ServerInfo(
         serverId: json['serverId'] as String,
         computerName: json['computerName'] as String,
         clipCount: (json['clipCount'] as num?)?.toInt() ?? 0,
+        serverVersion: json['serverVersion'] as String?,
+        apiVersion: (json['apiVersion'] as num?)?.toInt() ??
+            (json['protocolVersion'] as num?)?.toInt() ??
+            1,
+        capabilities: ((json['capabilities'] as List<dynamic>?) ?? const [])
+            .whereType<String>()
+            .toSet(),
       );
 
   final String serverId;
   final String computerName;
   final int clipCount;
+  final String? serverVersion;
+  final int apiVersion;
+  final Set<String> capabilities;
+
+  bool supports(String capability) => capabilities.contains(capability);
 }
 
 class PairingPayload {
@@ -109,6 +130,8 @@ class DownloadedClip {
     required this.sizeBytes,
     required this.lastWriteTimeUtc,
     required this.localPath,
+    this.duration,
+    this.thumbnailUrl,
   });
 
   factory DownloadedClip.fromJson(Map<String, dynamic> json) => DownloadedClip(
@@ -117,6 +140,8 @@ class DownloadedClip {
         sizeBytes: (json['sizeBytes'] as num).toInt(),
         lastWriteTimeUtc: DateTime.parse(json['lastWriteTimeUtc'] as String),
         localPath: json['localPath'] as String,
+        duration: _durationFromJson(json['durationMilliseconds']),
+        thumbnailUrl: json['thumbnailUrl'] as String?,
       );
 
   factory DownloadedClip.fromRemote(Clip clip, File file) => DownloadedClip(
@@ -125,6 +150,17 @@ class DownloadedClip {
         sizeBytes: clip.sizeBytes,
         lastWriteTimeUtc: clip.lastWriteTimeUtc,
         localPath: file.path,
+        duration: clip.duration,
+        thumbnailUrl: clip.thumbnailUrl,
+      );
+
+  Clip asRemoteClip() => Clip(
+        id: id,
+        fileName: fileName,
+        sizeBytes: sizeBytes,
+        lastWriteTimeUtc: lastWriteTimeUtc,
+        duration: duration,
+        thumbnailUrl: thumbnailUrl,
       );
 
   final String id;
@@ -132,6 +168,8 @@ class DownloadedClip {
   final int sizeBytes;
   final DateTime lastWriteTimeUtc;
   final String localPath;
+  final Duration? duration;
+  final String? thumbnailUrl;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -139,7 +177,16 @@ class DownloadedClip {
         'sizeBytes': sizeBytes,
         'lastWriteTimeUtc': lastWriteTimeUtc.toIso8601String(),
         'localPath': localPath,
+        if (duration != null) 'durationMilliseconds': duration!.inMilliseconds,
+        if (thumbnailUrl != null) 'thumbnailUrl': thumbnailUrl,
       };
+}
+
+Duration? _durationFromJson(Object? value) {
+  if (value is num && value >= 0) {
+    return Duration(milliseconds: value.toInt());
+  }
+  return null;
 }
 
 enum DeviceAvailability { checking, online, offline }

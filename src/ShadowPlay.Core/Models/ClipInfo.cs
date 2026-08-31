@@ -7,4 +7,5 @@ public sealed record ClipInfo(
     string Id,
     string FileName,
     long SizeBytes,
-    DateTimeOffset LastWriteTimeUtc);
+    DateTimeOffset LastWriteTimeUtc,
+    TimeSpan? Duration = null);

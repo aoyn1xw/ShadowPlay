@@ -27,6 +27,14 @@ public sealed class LanApiOptions
 
     public required IServerInfoProvider ServerInfo { get; init; }
 
+    /// <summary>Optional desktop-side duration and thumbnail provider.</summary>
+    public IClipPreviewProvider? ClipPreview { get; init; }
+
+    /// <summary>Product version reported to compatible clients.</summary>
+    public string ServerVersion { get; init; } = "0.1.0";
+
+    public const int ApiVersion = 1;
+
     /// <summary>TCP port to bind. 0 lets the OS pick a free port (used by tests/smoke).</summary>
     public int Port { get; init; } = Core.Models.AppSettingsData.DefaultPort;
 
@@ -38,4 +46,23 @@ public sealed class LanApiOptions
 
     /// <summary>Fresh bearer tokens are only ever returned here, once per pairing.</summary>
     public static readonly string ApiTitle = "ShadowPlay LAN API";
+
+    public IReadOnlyList<string> Capabilities
+    {
+        get
+        {
+            var capabilities = new List<string> { "clips.rangePlayback" };
+            if (ClipPreview is not null)
+            {
+                capabilities.Add("clips.duration");
+            }
+
+            if (ClipPreview?.SupportsThumbnails == true)
+            {
+                capabilities.Add("clips.thumbnails");
+            }
+
+            return capabilities;
+        }
+    }
 }

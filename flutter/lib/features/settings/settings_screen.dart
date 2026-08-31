@@ -86,117 +86,132 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => RefreshIndicator(
-        onRefresh: widget.state.refreshDeviceStatuses,
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.only(bottom: 24),
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-              child: Text(
-                'Settings',
-                style: Theme.of(context)
-                    .textTheme
-                    .headlineSmall
-                    ?.copyWith(fontWeight: FontWeight.w800),
-              ),
+  Widget build(BuildContext context) {
+    final server = widget.state.active == null
+        ? null
+        : widget.state.serverInfos[widget.state.active!.serverId];
+    return RefreshIndicator(
+      onRefresh: widget.state.refreshDeviceStatuses,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.only(bottom: 24),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+            child: Text(
+              'Settings',
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w800),
             ),
-            const _SectionLabel('Paired Devices'),
-            for (final connection in widget.state.connections)
-              _DeviceTile(
-                connection: connection,
-                status: widget.state.deviceStatuses[connection.serverId] ??
-                    const DeviceStatus.checking(),
-                selected: connection.serverId == widget.state.activeServerId,
-                onTap: () => widget.state.select(connection),
-                onForget: () => _confirmForget(connection),
-              ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-              child: FilledButton.icon(
-                onPressed: _pairNewDevice,
-                icon: const Icon(Icons.add),
-                label: const Text('Pair a New Device'),
-              ),
+          ),
+          const _SectionLabel('Paired Devices'),
+          for (final connection in widget.state.connections)
+            _DeviceTile(
+              connection: connection,
+              status: widget.state.deviceStatuses[connection.serverId] ??
+                  const DeviceStatus.checking(),
+              selected: connection.serverId == widget.state.activeServerId,
+              onTap: () => widget.state.select(connection),
+              onForget: () => _confirmForget(connection),
             ),
-            const _SectionLabel('Downloads / Storage'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: FilledButton.icon(
+              onPressed: _pairNewDevice,
+              icon: const Icon(Icons.add),
+              label: const Text('Pair a New Device'),
+            ),
+          ),
+          if (server != null) ...[
+            const _SectionLabel('Connected Desktop'),
             ListTile(
-              leading: const Icon(Icons.storage_outlined),
-              title: const Text('Storage used'),
-              subtitle: Text('${widget.state.downloadedClips.length} clips'),
-              trailing: Text(formatBytes(widget.state.storageUsedBytes)),
-            ),
-            ListTile(
-              enabled: widget.state.downloadedClips.isNotEmpty,
-              leading: const Icon(Icons.delete_outline),
-              title: const Text('Clear downloaded clips'),
-              subtitle: const Text('Keeps the original files on your PC'),
-              onTap: _confirmClearDownloads,
-            ),
-            const _SectionLabel('Notifications'),
-            SwitchListTile(
-              secondary: const Icon(Icons.video_library_outlined),
-              title: const Text('New clips'),
-              subtitle: const Text('Notify when new PC clips are available'),
-              value: widget.state.newClipNotifications,
-              onChanged: widget.state.setNewClipNotifications,
-            ),
-            SwitchListTile(
-              secondary: const Icon(Icons.download_done),
-              title: const Text('Downloads complete'),
-              subtitle:
-                  const Text('Notify when selected clips finish downloading'),
-              value: widget.state.downloadNotifications,
-              onChanged: widget.state.setDownloadNotifications,
-            ),
-            const _SectionLabel('Appearance / App'),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-              child: SegmentedButton<ThemeMode>(
-                segments: const [
-                  ButtonSegment(
-                      value: ThemeMode.system,
-                      icon: Icon(Icons.brightness_auto),
-                      label: Text('System')),
-                  ButtonSegment(
-                      value: ThemeMode.light,
-                      icon: Icon(Icons.light_mode_outlined),
-                      label: Text('Light')),
-                  ButtonSegment(
-                      value: ThemeMode.dark,
-                      icon: Icon(Icons.dark_mode_outlined),
-                      label: Text('Dark')),
-                ],
-                selected: {widget.state.themeMode},
-                showSelectedIcon: false,
-                onSelectionChanged: (value) =>
-                    widget.state.setThemeMode(value.first),
-              ),
-            ),
-            const _SectionLabel('About'),
-            const ListTile(
-              leading: Icon(Icons.info_outline),
-              title: Text('ShadowPlay'),
-              subtitle: Text('Version 0.1.0 (1)'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.help_outline),
-              title: const Text('About this app'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => showAboutDialog(
-                context: context,
-                applicationName: 'ShadowPlay',
-                applicationVersion: '0.1.0 (1)',
-                children: const [
-                  Text(
-                      'A private LAN client for downloading original game clips from your paired PC.'),
-                ],
+              leading: const Icon(Icons.computer_outlined),
+              title: Text(server.computerName),
+              subtitle: Text(
+                'ShadowPlay ${server.serverVersion ?? 'version unavailable'} · API v${server.apiVersion}',
               ),
             ),
           ],
-        ),
-      );
+          const _SectionLabel('Downloads / Storage'),
+          ListTile(
+            leading: const Icon(Icons.storage_outlined),
+            title: const Text('Storage used'),
+            subtitle: Text('${widget.state.downloadedClips.length} clips'),
+            trailing: Text(formatBytes(widget.state.storageUsedBytes)),
+          ),
+          ListTile(
+            enabled: widget.state.downloadedClips.isNotEmpty,
+            leading: const Icon(Icons.delete_outline),
+            title: const Text('Clear downloaded clips'),
+            subtitle: const Text('Keeps the original files on your PC'),
+            onTap: _confirmClearDownloads,
+          ),
+          const _SectionLabel('Notifications'),
+          SwitchListTile(
+            secondary: const Icon(Icons.video_library_outlined),
+            title: const Text('New clips'),
+            subtitle: const Text('Notify when new PC clips are available'),
+            value: widget.state.newClipNotifications,
+            onChanged: widget.state.setNewClipNotifications,
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.download_done),
+            title: const Text('Downloads complete'),
+            subtitle:
+                const Text('Notify when selected clips finish downloading'),
+            value: widget.state.downloadNotifications,
+            onChanged: widget.state.setDownloadNotifications,
+          ),
+          const _SectionLabel('Appearance / App'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            child: SegmentedButton<ThemeMode>(
+              segments: const [
+                ButtonSegment(
+                    value: ThemeMode.system,
+                    icon: Icon(Icons.brightness_auto),
+                    label: Text('System')),
+                ButtonSegment(
+                    value: ThemeMode.light,
+                    icon: Icon(Icons.light_mode_outlined),
+                    label: Text('Light')),
+                ButtonSegment(
+                    value: ThemeMode.dark,
+                    icon: Icon(Icons.dark_mode_outlined),
+                    label: Text('Dark')),
+              ],
+              selected: {widget.state.themeMode},
+              showSelectedIcon: false,
+              onSelectionChanged: (value) =>
+                  widget.state.setThemeMode(value.first),
+            ),
+          ),
+          const _SectionLabel('About'),
+          const ListTile(
+            leading: Icon(Icons.info_outline),
+            title: Text('ShadowPlay'),
+            subtitle: Text('Version 0.1.0 (1)'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.help_outline),
+            title: const Text('About this app'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => showAboutDialog(
+              context: context,
+              applicationName: 'ShadowPlay',
+              applicationVersion: '0.1.0 (1)',
+              children: const [
+                Text(
+                    'A private LAN client for downloading original game clips from your paired PC.'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _SectionLabel extends StatelessWidget {

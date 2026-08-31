@@ -197,6 +197,35 @@ public sealed class ClipMonitorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Unchanged_files_do_not_repeat_preview_processing()
+    {
+        _folder.CreateMp4("stable.mp4", 100);
+        var preview = new CountingPreviewProvider();
+
+        await using var monitor = new ClipMonitorService(
+            () => _folder.Path,
+            _catalog,
+            TimeProvider.System,
+            Fast,
+            previewProvider: preview);
+        await monitor.StartAsync();
+        try
+        {
+            await WaitForConditionAsync(
+                () => _catalog.GetClips().SingleOrDefault(),
+                clip => clip is not null && clip.Duration == TimeSpan.FromSeconds(7));
+
+            await Task.Delay(800);
+
+            Assert.Equal(1, preview.DurationCalls);
+        }
+        finally
+        {
+            await monitor.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task Stop_cancels_background_work_promptly_and_restart_works()
     {
         var monitor = new ClipMonitorService(() => _folder.Path, _catalog, TimeProvider.System, Fast);
@@ -244,6 +273,21 @@ public sealed class ClipMonitorServiceTests : IDisposable
             fullPath,
             new FileInfo(fullPath).Length,
             new DateTimeOffset(File.GetLastWriteTimeUtc(fullPath)));
+
+    private sealed class CountingPreviewProvider : IClipPreviewProvider
+    {
+        public bool SupportsThumbnails => false;
+
+        public int DurationCalls { get; private set; }
+
+        public TimeSpan? GetDuration(string fullPath)
+        {
+            DurationCalls++;
+            return TimeSpan.FromSeconds(7);
+        }
+
+        public byte[]? GetThumbnail(ClipEntry entry) => null;
+    }
 
     private static async Task<T> WaitForConditionAsync<T>(Func<T> probe, Func<T, bool> condition)
     {

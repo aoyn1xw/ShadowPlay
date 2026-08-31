@@ -10,6 +10,9 @@ enum ApiFailureKind {
   timeout,
   connectionRefused,
   networkUnreachable,
+  networkIsolation,
+  authenticationFailure,
+  apiIncompatible,
   network,
   http,
   malformedResponse,
@@ -49,6 +52,10 @@ class ShadowPlayApi {
 
   Map<String, String> get _headers => {'Authorization': 'Bearer $token'};
 
+  Map<String, String> get authorizationHeaders => Map.unmodifiable(_headers);
+
+  Uri clipStreamUri(Clip clip) => _uri('/clips/${clip.id}/download');
+
   Future<List<Clip>> clips() async {
     final response = await _withTimeout(
       http.get(_uri('/clips'), headers: _headers),
@@ -86,6 +93,7 @@ class ShadowPlayApi {
       if (body is! Map<String, dynamic>) {
         throw const FormatException('Expected a server object.');
       }
+      _checkApiCompatibility(body);
       return ServerInfo.fromJson(body);
     } catch (error) {
       if (error is ApiException) rethrow;
@@ -97,7 +105,7 @@ class ShadowPlayApi {
   }
 
   Future<http.StreamedResponse> startDownload(Clip clip) async {
-    final request = http.Request('GET', _uri('/clips/${clip.id}/download'));
+    final request = http.Request('GET', clipStreamUri(clip));
     request.headers.addAll(_headers);
     final response = await _withTimeout(
       request.send(),
@@ -106,6 +114,17 @@ class ShadowPlayApi {
     );
     _check(response.statusCode, request.url);
     return response;
+  }
+
+  Future<List<int>> thumbnail(Clip clip, {http.Client? client}) async {
+    final uri = _uri('/clips/${clip.id}/thumbnail');
+    final response = await _withTimeout(
+      client?.get(uri, headers: _headers) ?? http.get(uri, headers: _headers),
+      _requestTimeout,
+      uri,
+    );
+    _check(response.statusCode, uri);
+    return response.bodyBytes;
   }
 
   static Future<Map<String, dynamic>> health({
@@ -127,6 +146,7 @@ class ShadowPlayApi {
         if (body is! Map<String, dynamic> || body['status'] != 'ok') {
           throw const FormatException('Unexpected health response.');
         }
+        _checkApiCompatibility(body);
         return body;
       } catch (error) {
         if (error is ApiException) rethrow;
@@ -199,15 +219,15 @@ class ShadowPlayApi {
     }
     if (statusCode == 401) {
       throw const ApiException(
-        'Access was revoked. Pair with this PC again.',
-        kind: ApiFailureKind.http,
+        'Authentication failed. This phone may have been revoked; pair with the PC again.',
+        kind: ApiFailureKind.authenticationFailure,
         statusCode: 401,
       );
     }
     if (statusCode == 403) {
       throw const ApiException(
-        'The PC rejected this LAN request. Mark the Windows Wi-Fi network Private and connect both devices to the same Wi-Fi.',
-        kind: ApiFailureKind.http,
+        'Windows blocked this LAN request. Mark the Wi-Fi network Private and connect both devices to the same network.',
+        kind: ApiFailureKind.networkIsolation,
         statusCode: 403,
       );
     }
@@ -236,7 +256,7 @@ class ShadowPlayApi {
       return await request.timeout(timeout);
     } on TimeoutException {
       throw ApiException(
-        'Timed out reaching ${uri.host}:${uri.port}. Check that ShadowPlay is running, the phone is on the same Wi-Fi, and Windows Firewall allows private-network access on port ${uri.port}.',
+        'ShadowPlay did not respond at ${uri.host}:${uri.port}. Check that the PC is awake, sharing is running, and both devices are on the same Wi-Fi.',
         kind: ApiFailureKind.timeout,
       );
     } on SocketException catch (error) {
@@ -256,7 +276,7 @@ class ShadowPlayApi {
         code == 10061 ||
         lower.contains('connection refused')) {
       return ApiException(
-        'The PC refused the connection at ${uri.host}:${uri.port}. The ShadowPlay service may be stopped or the port may be blocked.',
+        'The ShadowPlay server is unavailable at ${uri.host}:${uri.port}. Start sharing on the PC and check Windows Firewall.',
         kind: ApiFailureKind.connectionRefused,
       );
     }
@@ -277,5 +297,15 @@ class ShadowPlayApi {
       'A network error prevented reaching ${uri.host}:${uri.port}. Check Wi-Fi, VPN settings, and Windows Firewall. ($message)',
       kind: ApiFailureKind.network,
     );
+  }
+
+  static void _checkApiCompatibility(Map<String, dynamic> body) {
+    final apiVersion = (body['apiVersion'] as num?)?.toInt();
+    if (apiVersion != null && apiVersion > 1) {
+      throw ApiException(
+        'This PC requires a newer ShadowPlay mobile app (API v$apiVersion). Update the phone app and try again.',
+        kind: ApiFailureKind.apiIncompatible,
+      );
+    }
   }
 }

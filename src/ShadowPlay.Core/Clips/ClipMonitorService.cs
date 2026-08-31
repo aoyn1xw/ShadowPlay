@@ -15,6 +15,7 @@ public sealed class ClipMonitorService : IAsyncDisposable
     private readonly IClipStore _store;
     private readonly TimeProvider _timeProvider;
     private readonly MonitorOptions _options;
+    private readonly IClipPreviewProvider? _previewProvider;
     private readonly ILogger? _logger;
 
     private readonly ConcurrentQueue<string> _pendingPaths = new();
@@ -32,13 +33,15 @@ public sealed class ClipMonitorService : IAsyncDisposable
         IClipStore store,
         TimeProvider timeProvider,
         MonitorOptions? options = null,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        IClipPreviewProvider? previewProvider = null)
     {
         _rootFolderProvider = rootFolderProvider ?? throw new ArgumentNullException(nameof(rootFolderProvider));
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _options = options ?? new MonitorOptions();
         _logger = logger;
+        _previewProvider = previewProvider;
         _tracker = new StabilityTracker(_options);
     }
 
@@ -321,7 +324,8 @@ public sealed class ClipMonitorService : IAsyncDisposable
                 info.Name,
                 info.FullName,
                 info.Length,
-                new DateTimeOffset(info.LastWriteTimeUtc));
+                new DateTimeOffset(info.LastWriteTimeUtc),
+                _previewProvider?.GetDuration(info.FullName));
 
             _store.AddOrUpdate(entry);
             _tracker.MarkPublished(path);

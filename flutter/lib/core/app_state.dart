@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -28,6 +29,10 @@ class AppState extends ChangeNotifier {
   List<Connection> connections = [];
   List<Clip> remoteClips = [];
   List<DownloadedClip> downloadedClips = [];
+  final Map<String, ServerInfo> serverInfos = {};
+  final Map<String, Uint8List> thumbnailCache = {};
+  final Set<String> unavailableThumbnails = {};
+  final Map<String, Future<Uint8List?>> _thumbnailRequests = {};
   final Map<String, DeviceStatus> deviceStatuses = {};
   final Map<String, double?> downloadProgress = {};
   final Map<String, String> downloadFailures = {};
@@ -155,6 +160,7 @@ class AppState extends ChangeNotifier {
     connections.add(connection);
     activeServerId = connection.serverId;
     _activeToken = response['token'] as String;
+    serverInfos[connection.serverId] = server;
     deviceStatuses[connection.serverId] = const DeviceStatus.online();
     await _secureStorage.write(
       key: 'token_$activeServerId',
@@ -184,6 +190,7 @@ class AppState extends ChangeNotifier {
     await _secureStorage.delete(key: 'token_${connection.serverId}');
     connections.removeWhere((item) => item.serverId == connection.serverId);
     deviceStatuses.remove(connection.serverId);
+    serverInfos.remove(connection.serverId);
     if (activeServerId == connection.serverId) {
       activeServerId = connections.isEmpty ? null : connections.first.serverId;
       _activeToken = activeServerId == null
@@ -204,7 +211,10 @@ class AppState extends ChangeNotifier {
       notifyListeners();
     }
     try {
-      remoteClips = await client.clips();
+      final info = await client.serverInfo();
+      final clips = await client.clips();
+      serverInfos[active!.serverId] = info;
+      remoteClips = clips;
       clipLoadError = null;
       lastSyncUtc = DateTime.now().toUtc();
       active!.lastSeenUtc = lastSyncUtc;
@@ -232,6 +242,7 @@ class AppState extends ChangeNotifier {
           throw const ApiException('Pairing token is missing.');
         }
         final info = await ShadowPlayApi(connection, token).serverInfo();
+        serverInfos[connection.serverId] = info;
         connection.computerName = info.computerName;
         connection.lastSeenUtc = DateTime.now().toUtc();
         deviceStatuses[connection.serverId] = const DeviceStatus.online();
@@ -242,6 +253,40 @@ class AppState extends ChangeNotifier {
     }));
     await _saveConnections();
     notifyListeners();
+  }
+
+  Future<Uint8List?> loadThumbnail(Clip clip) {
+    final url = clip.thumbnailUrl;
+    if (url == null) return Future.value(null);
+
+    final key =
+        '${clip.id}:${clip.sizeBytes}:${clip.lastWriteTimeUtc.toIso8601String()}';
+    final cached = thumbnailCache[key];
+    if (cached != null) return Future.value(cached);
+    if (unavailableThumbnails.contains(key)) return Future.value(null);
+    final existing = _thumbnailRequests[key];
+    if (existing != null) return existing;
+
+    final request = () async {
+      try {
+        final bytes = await api?.thumbnail(clip);
+        if (bytes == null || bytes.isEmpty) {
+          unavailableThumbnails.add(key);
+          return null;
+        }
+        thumbnailCache[key] = Uint8List.fromList(bytes);
+        return thumbnailCache[key];
+      } on ApiException catch (error) {
+        if (error.statusCode == 404) unavailableThumbnails.add(key);
+        return null;
+      } catch (_) {
+        return null;
+      } finally {
+        _thumbnailRequests.remove(key);
+      }
+    }();
+    _thumbnailRequests[key] = request;
+    return request;
   }
 
   Future<void> downloadClips(Iterable<Clip> clips,

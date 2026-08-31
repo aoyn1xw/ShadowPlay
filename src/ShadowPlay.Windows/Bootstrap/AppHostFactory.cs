@@ -45,6 +45,8 @@ public static class AppHostFactory
         services.AddSingleton<IDeviceRegistry, DeviceRegistry>();
         services.AddSingleton<IPairingService, PairingService>();
         services.AddSingleton<IWindowsFirewallService, WindowsFirewallService>();
+        services.AddSingleton<IClipPreviewProvider>(_ =>
+            new WindowsClipPreviewProvider(Path.Combine(DefaultBaseDirectory, "thumbnails")));
         services.AddSingleton<AppController>();
 
         services.AddSingleton(sp => new TrayIconService(sp.GetRequiredService<AppController>()));
