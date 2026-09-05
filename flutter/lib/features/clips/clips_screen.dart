@@ -1,4 +1,3 @@
-import 'dart:ui' as ui;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -6,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/app_state.dart';
 import '../../core/models.dart';
 import '../../shared/widgets.dart';
+import '../../shared/recording_row.dart';
 import '../player/player_screen.dart';
 
 class ClipsScreen extends StatefulWidget {
@@ -56,13 +56,30 @@ class _ClipsScreenState extends State<ClipsScreen> {
     }
     _selectedIds.removeWhere((id) => !clips.any((clip) => clip.id == id));
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        DeviceHeader(
-          connection: active,
-          status: widget.state.activeStatus,
-          lastSyncUtc: widget.state.lastSyncUtc,
-        ),
-        Expanded(child: _content(clips)),
+        Expanded(
+            child: RefreshIndicator(
+          onRefresh: widget.state.refreshClips,
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              SliverToBoxAdapter(
+                  child: DeviceHeader(
+                title: 'Clips on PC',
+                connection: active,
+                status: widget.state.activeStatus,
+                lastSyncUtc: widget.state.lastSyncUtc,
+              )),
+              SliverToBoxAdapter(
+                  child: LibraryHeading(
+                title: 'New recordings',
+                detail: '${clips.length} available · Select clips to download',
+              )),
+              _content(clips),
+            ],
+          ),
+        )),
         if (_selectedIds.isNotEmpty)
           SelectionActionBar(
             count: _selectedIds.length,
@@ -75,74 +92,69 @@ class _ClipsScreenState extends State<ClipsScreen> {
 
   Widget _content(List<Clip> clips) {
     if (widget.state.clipsLoading && widget.state.remoteClips.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return const SliverFillRemaining(
+          hasScrollBody: false,
+          child: Center(child: CircularProgressIndicator()));
     }
     if (widget.state.activeStatus.availability == DeviceAvailability.offline &&
         widget.state.remoteClips.isEmpty) {
-      return EmptyState(
-        icon: Icons.wifi_off,
-        title: 'PC is offline',
-        message: widget.state.clipLoadError ??
-            'Make sure the PC is running and on the same Wi-Fi network.',
-        action: FilledButton.tonal(
-          onPressed: widget.state.refreshClips,
-          child: const Text('Try Again'),
-        ),
-      );
+      return SliverFillRemaining(
+          hasScrollBody: false,
+          child: EmptyState(
+            icon: Icons.wifi_off,
+            title: 'PC is offline',
+            message: widget.state.clipLoadError ??
+                'Make sure the PC is running and on the same Wi-Fi network.',
+            action: FilledButton.tonal(
+              onPressed: widget.state.refreshClips,
+              child: const Text('Try Again'),
+            ),
+          ));
     }
     if (clips.isEmpty) {
-      return EmptyState(
-        icon: Icons.check_circle_outline,
-        title: 'No new clips',
-        message: 'You are all caught up. Pull down to check again.',
-        action: OutlinedButton.icon(
-          onPressed: widget.state.refreshClips,
-          icon: const Icon(Icons.refresh),
-          label: const Text('Refresh'),
-        ),
-      );
+      return SliverFillRemaining(
+          hasScrollBody: false,
+          child: EmptyState(
+            icon: Icons.check_circle_outline,
+            title: 'No new clips',
+            message: 'You are all caught up. Pull down to check again.',
+            action: OutlinedButton.icon(
+              onPressed: widget.state.refreshClips,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Refresh'),
+            ),
+          ));
     }
-    return RefreshIndicator(
-      onRefresh: widget.state.refreshClips,
-      child: GridView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-        physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: clips.length,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          childAspectRatio: 0.82,
-        ),
-        itemBuilder: (context, index) {
-          final clip = clips[index];
-          final selected = _selectedIds.contains(clip.id);
-          return _RemoteClipCard(
-            clip: clip,
-            loadThumbnail: widget.state.loadThumbnail,
-            selected: selected,
-            progress: widget.state.downloadProgress[clip.id],
-            downloading: widget.state.downloadProgress.containsKey(clip.id),
-            failed: widget.state.downloadFailures[clip.id],
-            onTap: () => setState(() {
-              if (!selected) {
-                _selectedIds.add(clip.id);
-              } else {
-                _selectedIds.remove(clip.id);
-              }
-            }),
-            onPlay: () {
-              final api = widget.state.api;
-              if (api == null) return;
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => PlayerScreen.remote(clip: clip, api: api),
-                ),
-              );
-            },
-          );
-        },
-      ),
+    return SliverList.builder(
+      itemCount: clips.length,
+      itemBuilder: (context, index) {
+        final clip = clips[index];
+        final selected = _selectedIds.contains(clip.id);
+        return _RemoteClipCard(
+          clip: clip,
+          loadThumbnail: widget.state.loadThumbnail,
+          selected: selected,
+          progress: widget.state.downloadProgress[clip.id],
+          downloading: widget.state.downloadProgress.containsKey(clip.id),
+          failed: widget.state.downloadFailures[clip.id],
+          onTap: () => setState(() {
+            if (!selected) {
+              _selectedIds.add(clip.id);
+            } else {
+              _selectedIds.remove(clip.id);
+            }
+          }),
+          onPlay: () {
+            final api = widget.state.api;
+            if (api == null) return;
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => PlayerScreen.remote(clip: clip, api: api),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -170,87 +182,40 @@ class _RemoteClipCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Material(
-      color: colors.surfaceContainerLow,
-      clipBehavior: ui.Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(
-          color: selected ? colors.primary : colors.outlineVariant,
-          width: selected ? 2.5 : 1,
-        ),
-      ),
-      child: InkWell(
-        onTap: downloading ? null : onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  _RemoteThumbnail(
-                    clip: clip,
-                    loadThumbnail: loadThumbnail,
-                    selected: selected,
-                  ),
-                  Positioned(
-                    left: 6,
-                    top: 6,
-                    child: IconButton.filledTonal(
-                      tooltip: 'Play from PC',
-                      onPressed: downloading ? null : onPlay,
-                      icon: const Icon(Icons.play_arrow),
-                    ),
-                  ),
-                  if (downloading)
-                    ColoredBox(
-                      color: Colors.black45,
-                      child: Center(
-                        child: SizedBox(
-                          width: 46,
-                          height: 46,
-                          child: CircularProgressIndicator(
-                            value: progress,
-                            color: Colors.white,
-                            backgroundColor: Colors.white24,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-              child: Text(
-                clip.fileName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(fontWeight: FontWeight.w700),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-              child: Text(
-                failed == null
-                    ? '${clip.duration == null ? 'Duration unknown' : formatDuration(clip.duration!)} · ${formatBytes(clip.sizeBytes)} · ${formatClipDate(clip.lastWriteTimeUtc)}'
-                    : 'Download failed · tap to retry',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: failed == null
-                          ? colors.onSurfaceVariant
-                          : colors.error,
-                    ),
-              ),
-            ),
-          ],
-        ),
+    return RecordingRow(
+      preview: Stack(fit: StackFit.expand, children: [
+        _RemoteThumbnail(
+            clip: clip, loadThumbnail: loadThumbnail, selected: false),
+        Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton(
+              tooltip: 'Play from PC',
+              style: IconButton.styleFrom(
+                  backgroundColor: Colors.black54,
+                  foregroundColor: Colors.white),
+              onPressed: downloading ? null : onPlay,
+              icon: const Icon(Icons.play_arrow),
+            )),
+      ]),
+      fileName: clip.fileName,
+      metadata:
+          '${formatBytes(clip.sizeBytes)}\n${formatClipDate(clip.lastWriteTimeUtc)}',
+      selected: selected,
+      downloading: downloading,
+      progress: progress,
+      status: failed == null
+          ? null
+          : 'Download failed. Select and download to retry.',
+      onTap: downloading ? null : onTap,
+      action: IconButton(
+        tooltip:
+            selected ? 'Deselect ${clip.fileName}' : 'Select ${clip.fileName}',
+        onPressed: downloading ? null : onTap,
+        icon:
+            Icon(selected ? Icons.check_circle : Icons.radio_button_unchecked),
+        color: selected
+            ? Theme.of(context).colorScheme.primary
+            : Theme.of(context).colorScheme.outline,
       ),
     );
   }
@@ -297,6 +262,7 @@ class _RemoteThumbnailState extends State<_RemoteThumbnail> {
           final bytes = snapshot.data;
           if (bytes == null || bytes.isEmpty) {
             return ClipPoster(
+              showIcon: false,
               badge: widget.clip.duration == null
                   ? formatBytes(widget.clip.sizeBytes)
                   : formatDuration(widget.clip.duration!),
@@ -371,23 +337,19 @@ class SelectionActionBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-        elevation: 3,
+        elevation: 0,
         color: Theme.of(context).colorScheme.surfaceContainer,
         child: SafeArea(
           top: false,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(18, 12, 18, 12),
-            child: Row(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: Text(
-                    '$count selected',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w700),
-                  ),
-                ),
+                Text('$count selected',
+                    style: Theme.of(context).textTheme.labelLarge),
+                const SizedBox(height: 8),
                 FilledButton.icon(
                   onPressed: busy ? null : onDownload,
                   icon: busy

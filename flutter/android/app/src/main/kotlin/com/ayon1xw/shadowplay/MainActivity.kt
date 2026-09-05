@@ -1,4 +1,4 @@
-package com.example.shadowplay
+package com.ayon1xw.shadowplay
 
 import io.flutter.embedding.android.FlutterActivity
 

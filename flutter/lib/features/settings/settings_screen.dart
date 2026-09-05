@@ -102,11 +102,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               'Settings',
               style: Theme.of(context)
                   .textTheme
-                  .headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.w800),
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.w600),
             ),
           ),
-          const _SectionLabel('Paired Devices'),
+          const _SectionLabel('Paired PCs'),
           for (final connection in widget.state.connections)
             _DeviceTile(
               connection: connection,
@@ -118,7 +118,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: FilledButton.icon(
+            child: OutlinedButton.icon(
               onPressed: _pairNewDevice,
               icon: const Icon(Icons.add),
               label: const Text('Pair a New Device'),
@@ -134,7 +134,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ],
-          const _SectionLabel('Downloads / Storage'),
+          const _SectionLabel('Downloads'),
           ListTile(
             leading: const Icon(Icons.storage_outlined),
             title: const Text('Storage used'),
@@ -164,29 +164,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
             value: widget.state.downloadNotifications,
             onChanged: widget.state.setDownloadNotifications,
           ),
-          const _SectionLabel('Appearance / App'),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-            child: SegmentedButton<ThemeMode>(
-              segments: const [
-                ButtonSegment(
-                    value: ThemeMode.system,
-                    icon: Icon(Icons.brightness_auto),
-                    label: Text('System')),
-                ButtonSegment(
-                    value: ThemeMode.light,
-                    icon: Icon(Icons.light_mode_outlined),
-                    label: Text('Light')),
-                ButtonSegment(
-                    value: ThemeMode.dark,
-                    icon: Icon(Icons.dark_mode_outlined),
-                    label: Text('Dark')),
-              ],
-              selected: {widget.state.themeMode},
-              showSelectedIcon: false,
-              onSelectionChanged: (value) =>
-                  widget.state.setThemeMode(value.first),
-            ),
+          const _SectionLabel('Appearance'),
+          ListTile(
+            leading: const Icon(Icons.contrast),
+            title: const Text('Theme'),
+            subtitle: Text(switch (widget.state.themeMode) {
+              ThemeMode.system => 'System',
+              ThemeMode.light => 'Light',
+              ThemeMode.dark => 'Dark'
+            }),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => showModalBottomSheet<void>(
+                context: context,
+                showDragHandle: true,
+                builder: (context) => SafeArea(
+                        child: SingleChildScrollView(
+                            child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                          for (final mode in ThemeMode.values)
+                            ListTile(
+                              title: Text(switch (mode) {
+                                ThemeMode.system => 'System',
+                                ThemeMode.light => 'Light',
+                                ThemeMode.dark => 'Dark'
+                              }),
+                              leading: Icon(switch (mode) {
+                                ThemeMode.system => Icons.brightness_auto,
+                                ThemeMode.light => Icons.light_mode_outlined,
+                                ThemeMode.dark => Icons.dark_mode_outlined
+                              }),
+                              trailing: widget.state.themeMode == mode
+                                  ? const Icon(Icons.check)
+                                  : null,
+                              onTap: () {
+                                widget.state.setThemeMode(mode);
+                                Navigator.pop(context);
+                              },
+                            ),
+                        ])))),
           ),
           const _SectionLabel('About'),
           const ListTile(
@@ -222,11 +238,10 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.fromLTRB(20, 22, 20, 8),
         child: Text(
-          label.toUpperCase(),
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: Theme.of(context).colorScheme.primary,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.8,
+          label,
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
               ),
         ),
       );
@@ -299,7 +314,7 @@ class _DeviceTile extends StatelessWidget {
       trailing: IconButton(
         tooltip: 'Forget device',
         onPressed: onForget,
-        icon: const Icon(Icons.more_vert),
+        icon: const Icon(Icons.link_off),
       ),
     );
   }
