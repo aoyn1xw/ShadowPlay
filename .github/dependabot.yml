@@ -9,13 +9,28 @@ updates:
       - "/tests/ShadowPlay.Tests"
     schedule:
       interval: "weekly"
+    groups:
+      dotnet-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "pub"
     directory: "/flutter"
     schedule:
       interval: "weekly"
+    groups:
+      flutter-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
