@@ -40,7 +40,7 @@ jobs:
 
       - name: Upload .NET coverage
         if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           files: TestResults/**/coverage.cobertura.xml
           flags: dotnet
@@ -125,7 +125,7 @@ jobs:
 
       - name: Upload Flutter coverage
         if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           files: flutter/coverage/lcov.info
           flags: flutter
