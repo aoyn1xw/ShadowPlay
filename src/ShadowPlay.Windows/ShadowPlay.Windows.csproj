@@ -9,6 +9,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>ShadowPlay.Windows</RootNamespace>
     <AssemblyName>ShadowPlay</AssemblyName>
+    <ApplicationIcon>..\..\flutter\windows\runner\resources\app_icon.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
 

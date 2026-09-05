@@ -226,6 +226,33 @@ This MVP runs **plain HTTP on your LAN**:
 Planned hardening (architecture already supports it): pinned self-signed HTTPS between the
 desktop app and the phone, replacing the plain transport in `LanApiFactory`.
 
+## Building the Windows installer
+
+The installer contains the self-contained Windows x64 publish, so the target computer does not
+need a separate .NET runtime. Install Inno Setup 6, choose a release version, then run these
+commands from the repository root:
+
+```powershell
+dotnet restore src/ShadowPlay.Windows/ShadowPlay.Windows.csproj -r win-x64
+$version = "0.1.0"
+dotnet publish src/ShadowPlay.Windows/ShadowPlay.Windows.csproj `
+  -c Release -r win-x64 --self-contained true --no-restore `
+  -p:Version=$version -o publish/win-x64
+$iscc = @(
+  "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+  "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+  "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+& $iscc "/DMyAppVersion=$version" installer\ShadowPlay.iss
+```
+
+The finished installer is `artifacts\installer\ShadowPlay-Setup-0.1.0.exe`. It installs per
+machine into `C:\Program Files\ShadowPlay`, creates a Start Menu shortcut, offers an optional
+desktop shortcut, and registers its uninstaller with Windows. Reinstalling with the same stable
+installer identity upgrades the existing installation. Uninstall preserves `%LocalAppData%\ShadowPlay`
+unless the user explicitly chooses to remove settings, pairing information, logs, and cached
+previews.
+
 ## Publishing a win-x64 build
 
 Framework-dependent (small; requires .NET 8 runtimes installed on target):
@@ -251,7 +278,8 @@ The workflows are separated by purpose:
   debug compilation, and unsigned iOS compilation. The Android job installs platform 37.0
   before compiling. PR CI does not use iOS signing secrets.
 - [`release.yml`](.github/workflows/release.yml) runs for version tags matching `v*`. It builds
-  the Windows release and Android release APK, then creates or updates the tagged GitHub Release.
+  the Windows x64 Inno Setup installer and Android release APK, uploads both as workflow
+  artifacts, then creates or updates the tagged GitHub Release with those assets.
 - [`ios-ota.yml`](.github/workflows/ios-ota.yml) runs through manual dispatch, keeping signed
   builds out of ordinary `main` pushes. It owns certificate/profile installation, signed iOS OTA
   export, the `latest` OTA release, and the OTA manifest.
@@ -275,7 +303,7 @@ configuration; configure a release keystore separately before treating that APK 
 - Cloud storage, accounts, telemetry, external servers — there are none
 - Automatic uploading/syncing, video editing, re-encoding, thumbnails
 - Other recording providers (OBS, console capture, …)
-- Installer / Microsoft Store packaging
+- Microsoft Store packaging
 - Automatic firewall changes, launch-at-startup
 - HTTPS transport (structured for, not yet implemented)
 
@@ -297,7 +325,7 @@ flutter/
   test/                 Unit and widget test suites
 .github/workflows/
   ci.yml                Pull-request validation and manual checks
-  release.yml           Windows and Android assets for version tags
+  release.yml           Windows installer and Android assets for version tags
   ios-ota.yml           Signed iOS OTA build and distribution
   codeql.yml            Separate CodeQL analysis
 ```

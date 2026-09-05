@@ -24,24 +24,90 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Restore
-        run: dotnet restore ShadowPlay.sln
+      - name: Resolve release version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_NAME -notmatch '^v(?<version>\d+\.\d+\.\d+)$') {
+            throw "Release tags must use the format vMAJOR.MINOR.PATCH (for example, v1.2.3)."
+          }
 
-      - name: Publish
+          "SHADOWPLAY_VERSION=$($Matches.version)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Restore
+        run: >
+          dotnet restore
+          src/ShadowPlay.Windows/ShadowPlay.Windows.csproj
+          -r win-x64
+
+      - name: Build and publish Windows x64
         run: >
           dotnet publish
           src/ShadowPlay.Windows/ShadowPlay.Windows.csproj
           -c Release
           -r win-x64
-          --self-contained false
+          --self-contained true
           --no-restore
+          -p:Version=$env:SHADOWPLAY_VERSION
           -o publish/win-x64
 
-      - name: Upload Windows build
+      - name: Compile Windows installer
+        shell: pwsh
+        run: |
+          $iscc = @(
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          if (-not $iscc) {
+            throw "Inno Setup Compiler (ISCC.exe) was not found on the runner."
+          }
+
+          & $iscc "/DMyAppVersion=$env:SHADOWPLAY_VERSION" "installer\ShadowPlay.iss"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Verify Windows installer
+        shell: pwsh
+        run: |
+          $installer = "artifacts\installer\ShadowPlay-Setup-$env:SHADOWPLAY_VERSION.exe"
+          $publishedExe = "publish\win-x64\ShadowPlay.exe"
+
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
+            throw "Expected installer was not created: $installer"
+          }
+
+          foreach ($requiredFile in @($publishedExe, "publish\win-x64\coreclr.dll", "publish\win-x64\hostfxr.dll")) {
+            if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
+              throw "Self-contained publish file is missing: $requiredFile"
+            }
+          }
+
+          $file = Get-Item -LiteralPath $installer
+          if ($file.Length -le 0) {
+            throw "Installer is empty: $installer"
+          }
+
+          $appVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($publishedExe).ProductVersion.Trim()
+          $installerVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($installer).ProductVersion.Trim()
+
+          if (-not $appVersion.StartsWith($env:SHADOWPLAY_VERSION, [StringComparison]::Ordinal)) {
+            throw "Published app version '$appVersion' does not match '$env:SHADOWPLAY_VERSION'."
+          }
+
+          if ($installerVersion -ne $env:SHADOWPLAY_VERSION) {
+            throw "Installer version '$installerVersion' does not match '$env:SHADOWPLAY_VERSION'."
+          }
+
+          Write-Host "Verified installer: $($file.Name) ($($file.Length) bytes), version $installerVersion"
+
+      - name: Upload Windows installer
         uses: actions/upload-artifact@v7
         with:
-          name: release-windows
-          path: publish/win-x64/
+          name: ShadowPlay-Windows-installer
+          path: artifacts/installer/ShadowPlay-Setup-*.exe
           if-no-files-found: error
 
   android:
@@ -101,7 +167,7 @@ jobs:
       - name: Download Windows build
         uses: actions/download-artifact@v8
         with:
-          name: release-windows
+          name: ShadowPlay-Windows-installer
           path: release-assets/windows
 
       - name: Download Android build
@@ -117,7 +183,13 @@ jobs:
 
           mkdir -p dist
 
-          (cd release-assets/windows && zip -qry ../../dist/ShadowPlay-win-x64.zip .)
+          WINDOWS_INSTALLER="$(find release-assets/windows -maxdepth 1 -type f -name 'ShadowPlay-Setup-*.exe' | head -n 1)"
+          if [ -z "$WINDOWS_INSTALLER" ]; then
+            echo "::error::Windows installer not found"
+            exit 1
+          fi
+
+          cp "$WINDOWS_INSTALLER" "dist/$(basename "$WINDOWS_INSTALLER")"
 
           APK_FILE="$(find release-assets/android -type f -name '*.apk' | head -n 1)"
           if [ -z "$APK_FILE" ]; then
