@@ -13,9 +13,9 @@ byte-for-byte recordings.
 > **Status:** Windows desktop app (MVP) implemented, plus a cross-platform Flutter mobile client
 > under [`flutter/`](flutter/README.md).
 >
-> **CI:** pull requests run Windows, Flutter, Android, and unsigned iOS checks. Version tags
-> (`v*`) publish Windows and Android release assets. Signed iOS OTA builds run separately from
-> [`ios-ota.yml`](.github/workflows/ios-ota.yml).
+> **CI:** pull requests run Windows, Flutter, Android, and unsigned iOS checks. Successful `main`
+> builds refresh the `latest` prerelease, while version tags (`v*`) publish normal Windows and
+> Android releases. Signed iOS OTA builds run separately from [`ios-ota.yml`](.github/workflows/ios-ota.yml).
 
 ---
 
@@ -277,9 +277,10 @@ The workflows are separated by purpose:
   Windows build/test/smoke check, shared Flutter dependency/analyze/test validation, Android
   debug compilation, and unsigned iOS compilation. The Android job installs platform 37.0
   before compiling. PR CI does not use iOS signing secrets.
-- [`release.yml`](.github/workflows/release.yml) runs for version tags matching `v*`. It builds
-  the Windows x64 Inno Setup installer and Android release APK, uploads both as workflow
-  artifacts, then creates or updates the tagged GitHub Release with those assets.
+- [`release.yml`](.github/workflows/release.yml) runs on `main`, version tags matching `v*`, and
+  manual dispatch. It builds the Windows x64 Inno Setup installer and Android release APK. A
+  successful `main` build refreshes the `latest` prerelease while preserving its signed iOS IPA;
+  version tags create or update normal GitHub Releases.
 - [`ios-ota.yml`](.github/workflows/ios-ota.yml) runs through manual dispatch, keeping signed
   builds out of ordinary `main` pushes. It owns certificate/profile installation, signed iOS OTA
   export, the `latest` OTA release, and the OTA manifest.
@@ -325,7 +326,7 @@ flutter/
   test/                 Unit and widget test suites
 .github/workflows/
   ci.yml                Pull-request validation and manual checks
-  release.yml           Windows installer and Android assets for version tags
+  release.yml           Rolling latest and versioned Windows/Android releases
   ios-ota.yml           Signed iOS OTA build and distribution
   codeql.yml            Separate CodeQL analysis
 ```

@@ -2,12 +2,15 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -16,6 +19,8 @@ jobs:
   windows:
     name: Windows release
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.release_version.outputs.version }}
 
     steps:
       - uses: actions/checkout@v7
@@ -25,13 +30,26 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Resolve release version
+        id: release_version
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF_NAME -notmatch '^v(?<version>\d+\.\d+\.\d+)$') {
-            throw "Release tags must use the format vMAJOR.MINOR.PATCH (for example, v1.2.3)."
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            if ($env:GITHUB_REF_NAME -notmatch '^v(?<version>\d+\.\d+\.\d+)$') {
+              throw "Release tags must use the format vMAJOR.MINOR.PATCH (for example, v1.2.3)."
+            }
+
+            $version = $Matches.version
+          } else {
+            [xml] $props = Get-Content -Raw "Directory.Build.props"
+            $version = [string] $props.Project.PropertyGroup.Version
+
+            if ($version -notmatch '^\d+\.\d+\.\d+$') {
+              throw "Directory.Build.props must contain a numeric MAJOR.MINOR.PATCH Version."
+            }
           }
 
-          "SHADOWPLAY_VERSION=$($Matches.version)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SHADOWPLAY_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Restore
         run: >
@@ -200,10 +218,113 @@ jobs:
           cp "$APK_FILE" dist/ShadowPlay-Android.apk
           ls -lh dist
 
-      - name: Create or update GitHub Release
+      - name: Preserve iOS asset and replace rolling release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view latest >/dev/null 2>&1; then
+            if gh release view latest --json assets --jq '.assets[].name' | grep -Fxq 'ShadowPlay.ipa'; then
+              gh release download latest \
+                --pattern 'ShadowPlay.ipa' \
+                --dir dist
+
+              test -s dist/ShadowPlay.ipa
+            fi
+
+            gh release delete latest --cleanup-tag --yes
+          elif gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/latest" >/dev/null 2>&1; then
+            gh api \
+              --method DELETE \
+              "repos/$GITHUB_REPOSITORY/git/refs/tags/latest"
+          fi
+
+      - name: Create rolling latest release
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          preserve_order: true
+          tag_name: latest
+          target_commitish: ${{ github.sha }}
+          name: ShadowPlay (Latest Build)
+          body: |
+            Automated latest build from `main` commit `${{ github.sha }}`.
+
+            ## Downloads
+
+            - **Windows Desktop:** `ShadowPlay-Setup-${{ needs.windows.outputs.version }}.exe`
+            - **Android:** `ShadowPlay-Android.apk`
+            - **iOS OTA / Ad Hoc:** `ShadowPlay.ipa`
+
+            The signed iOS build can only be installed on devices included in its provisioning profile.
+          draft: false
+          prerelease: true
+          make_latest: false
+          generate_release_notes: false
+
+      - name: Verify rolling latest release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ASSETS="$(gh release view latest --json assets --jq '.assets[].name')"
+          printf '%s\n' "$ASSETS"
+
+          grep -Fxq "ShadowPlay-Setup-${{ needs.windows.outputs.version }}.exe" <<<"$ASSETS"
+          grep -Fxq "ShadowPlay-Android.apk" <<<"$ASSETS"
+
+          if [ -f dist/ShadowPlay.ipa ]; then
+            grep -Fxq "ShadowPlay.ipa" <<<"$ASSETS"
+          fi
+
+          if grep -Fxq "ShadowPlay-win-x64.zip" <<<"$ASSETS" || \
+             grep -Fxq "ShadowPlay-Android-debug.apk" <<<"$ASSETS"; then
+            echo "::error::The rolling release still contains superseded assets"
+            exit 1
+          fi
+
+          RELEASE_SHA="$(
+            gh api \
+              "repos/$GITHUB_REPOSITORY/git/ref/tags/latest" \
+              --jq '.object.sha'
+          )"
+
+          if [ "$RELEASE_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::latest points to $RELEASE_SHA instead of $GITHUB_SHA"
+            exit 1
+          fi
+
+          PRERELEASE="$(gh release view latest --json isPrerelease --jq '.isPrerelease')"
+          PUBLISHED_AT="$(gh release view latest --json publishedAt --jq '.publishedAt')"
+          PUBLISHED_AGE_SECONDS="$(($(date +%s) - $(date -d "$PUBLISHED_AT" +%s)))"
+
+          if [ "$PRERELEASE" != "true" ]; then
+            echo "::error::latest is not marked as a prerelease"
+            exit 1
+          fi
+
+          if [ "$PUBLISHED_AGE_SECONDS" -lt 0 ] || [ "$PUBLISHED_AGE_SECONDS" -gt 900 ]; then
+            echo "::error::latest was not freshly published: $PUBLISHED_AT"
+            exit 1
+          fi
+
+      - name: Create or update versioned GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          preserve_order: true
           draft: false
           prerelease: false
           generate_release_notes: true

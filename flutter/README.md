@@ -41,7 +41,8 @@ cleartext LAN traffic for the current HTTP v1 desktop API. The API is intended
 for trusted home Wi-Fi; HTTP does not provide transport confidentiality.
 
 GitHub Actions compiles the Android debug APK and unsigned iOS app during pull-request
-validation without publishing those intermediate outputs. Version tags build the Android
-release APK, while signed iOS distribution is handled separately by the repository's
+validation without publishing those intermediate outputs. Successful `main` builds refresh the
+`latest` prerelease with an Android release APK, and version tags publish normal releases. Signed
+iOS distribution is handled separately by the repository's
 [`ios-ota.yml`](../.github/workflows/ios-ota.yml) workflow. The unsigned iOS build must be
 signed before it can be installed on a physical device.
