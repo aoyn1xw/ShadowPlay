@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 import '../../core/app_state.dart';
 import '../../core/models.dart';
 import '../../shared/widgets.dart';
+import '../../shared/recording_row.dart';
 import '../player/player_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -34,21 +35,15 @@ class HomeScreen extends StatelessWidget {
               connection: active,
               status: state.activeStatus,
               lastSyncUtc: state.lastSyncUtc,
-              welcome: true,
+              title: 'ShadowPlay',
             ),
           ),
           SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 6, 20, 12),
-              child: Text(
-                'Downloaded clips',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w700),
-              ),
-            ),
-          ),
+              child: LibraryHeading(
+            title: 'Downloaded clips',
+            detail:
+                '${state.downloadedClips.length} on this phone · Available offline',
+          )),
           if (state.downloadedClips.isEmpty)
             const SliverFillRemaining(
               hasScrollBody: false,
@@ -61,15 +56,9 @@ class HomeScreen extends StatelessWidget {
             )
           else
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-              sliver: SliverGrid.builder(
+              padding: const EdgeInsets.only(bottom: 24),
+              sliver: SliverList.builder(
                 itemCount: state.downloadedClips.length,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 0.82,
-                ),
                 itemBuilder: (context, index) {
                   final clip = state.downloadedClips[index];
                   return _DownloadedClipCard(
@@ -117,74 +106,38 @@ class _DownloadedClipCard extends StatelessWidget {
   final String? galleryFailure;
 
   @override
-  Widget build(BuildContext context) => Material(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        clipBehavior: ui.Clip.antiAlias,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          onTap: onTap,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _LocalVideoPreview(path: clip.localPath),
-                    Positioned(
-                      top: 6,
-                      right: 6,
-                      child: IconButton.filledTonal(
-                        tooltip: gallerySaved
-                            ? 'Saved to Photos/Gallery'
-                            : 'Save to Photos/Gallery',
-                        onPressed: gallerySaved
-                            ? null
-                            : () {
-                                onSave();
-                              },
-                        icon: Icon(gallerySaved
-                            ? Icons.check
-                            : galleryFailure == null
-                                ? Icons.save_alt
-                                : Icons.warning_amber_rounded),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-                child: Text(
-                  clip.fileName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(fontWeight: FontWeight.w700),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 11),
-                child: Text(
-                  '${clip.duration == null ? 'Duration unknown' : formatDuration(clip.duration!)} · ${formatBytes(clip.sizeBytes)} · ${formatClipDate(clip.lastWriteTimeUtc)}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                ),
-              ),
-            ],
-          ),
+  Widget build(BuildContext context) => RecordingRow(
+        preview:
+            _LocalVideoPreview(path: clip.localPath, duration: clip.duration),
+        fileName: clip.fileName,
+        metadata:
+            '${formatBytes(clip.sizeBytes)}\n${formatClipDate(clip.lastWriteTimeUtc)}',
+        status: galleryFailure == null
+            ? null
+            : 'Gallery save failed. Use the save button to retry.',
+        onTap: onTap,
+        action: IconButton(
+          tooltip: gallerySaved
+              ? 'Saved to Photos/Gallery'
+              : 'Save to Photos/Gallery',
+          onPressed: gallerySaved
+              ? null
+              : () {
+                  onSave();
+                },
+          icon: Icon(gallerySaved
+              ? Icons.check
+              : galleryFailure == null
+                  ? Icons.save_alt
+                  : Icons.warning_amber_rounded),
         ),
       );
 }
 
 class _LocalVideoPreview extends StatefulWidget {
-  const _LocalVideoPreview({required this.path});
+  const _LocalVideoPreview({required this.path, this.duration});
   final String path;
+  final Duration? duration;
 
   @override
   State<_LocalVideoPreview> createState() => _LocalVideoPreviewState();
@@ -238,7 +191,12 @@ class _LocalVideoPreviewState extends State<_LocalVideoPreview> {
   Widget build(BuildContext context) {
     final controller = _controller;
     if (controller == null || _error != null) {
-      return ClipPoster(badge: _error == null ? 'Loading' : 'Video');
+      return ClipPoster(
+          badge: widget.duration != null
+              ? formatDuration(widget.duration!)
+              : _error == null
+                  ? 'Loading'
+                  : 'Video');
     }
     return Stack(
       fit: StackFit.expand,

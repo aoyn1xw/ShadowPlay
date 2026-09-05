@@ -24,7 +24,8 @@ class EmptyState extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(icon,
-                  size: 48, color: Theme.of(context).colorScheme.primary),
+                  size: 36,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
               const SizedBox(height: 16),
               Text(title,
                   style: Theme.of(context).textTheme.titleLarge,
@@ -49,14 +50,14 @@ class DeviceHeader extends StatelessWidget {
     required this.connection,
     required this.status,
     this.lastSyncUtc,
-    this.welcome = false,
+    this.title,
     super.key,
   });
 
   final Connection connection;
   final DeviceStatus status;
   final DateTime? lastSyncUtc;
-  final bool welcome;
+  final String? title;
 
   @override
   Widget build(BuildContext context) {
@@ -68,21 +69,19 @@ class DeviceHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (welcome)
+          if (title != null) ...[
             Text(
-              'Welcome',
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: colors.primary,
-                    fontWeight: FontWeight.w700,
+              title!,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
                   ),
             ),
+            const SizedBox(height: 20),
+          ],
           const SizedBox(height: 2),
           Text(
             connection.computerName,
-            style: Theme.of(context)
-                .textTheme
-                .headlineSmall
-                ?.copyWith(fontWeight: FontWeight.w700),
+            style: Theme.of(context).textTheme.titleSmall,
           ),
           const SizedBox(height: 7),
           Row(
@@ -95,7 +94,7 @@ class DeviceHeader extends StatelessWidget {
                   color: checking
                       ? colors.outline
                       : online
-                          ? const Color(0xFF2E9D59)
+                          ? colors.primary
                           : colors.error,
                 ),
               ),
@@ -121,10 +120,15 @@ class DeviceHeader extends StatelessWidget {
 }
 
 class ClipPoster extends StatelessWidget {
-  const ClipPoster({required this.badge, this.selected = false, super.key});
+  const ClipPoster(
+      {required this.badge,
+      this.selected = false,
+      this.showIcon = true,
+      super.key});
 
   final String badge;
   final bool selected;
+  final bool showIcon;
 
   @override
   Widget build(BuildContext context) {
@@ -134,8 +138,10 @@ class ClipPoster extends StatelessWidget {
       children: [
         ColoredBox(
           color: colors.surfaceContainerHigh,
-          child: Icon(Icons.videocam_outlined,
-              size: 42, color: colors.onSurfaceVariant),
+          child: showIcon
+              ? Icon(Icons.videocam_outlined,
+                  size: 28, color: colors.onSurfaceVariant)
+              : null,
         ),
         if (selected) ColoredBox(color: colors.primary.withValues(alpha: 0.13)),
         Positioned(

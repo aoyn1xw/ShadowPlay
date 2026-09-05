@@ -91,38 +91,25 @@ class _IntroPage extends StatelessWidget {
   final VoidCallback onContinue;
 
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            const Spacer(flex: 3),
-            Icon(Icons.devices,
-                size: 82, color: Theme.of(context).colorScheme.primary),
-            const SizedBox(height: 28),
-            Text(
-              'Get Started',
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineMedium
-                  ?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Connect your phone to your PC to sync and watch your best clips anywhere.',
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    height: 1.45,
-                  ),
-              textAlign: TextAlign.center,
-            ),
-            const Spacer(flex: 4),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                  onPressed: onContinue, child: const Text('Continue')),
-            ),
-          ],
-        ),
+  Widget build(BuildContext context) => _SetupPage(
+        icon: Icons.sports_esports_outlined,
+        title: 'Your recordings. On your phone.',
+        message:
+            'Connect to ShadowPlay on your PC to browse gameplay recordings, download originals and watch them offline.',
+        action:
+            FilledButton(onPressed: onContinue, child: const Text('Continue')),
+        children: const [
+          ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.wifi),
+              title: Text('Start on the same Wi-Fi'),
+              subtitle: Text('Keep ShadowPlay running on your PC.')),
+          ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.qr_code_scanner),
+              title: Text('Pair once with a QR code'),
+              subtitle: Text('A manual pairing code works too.')),
+        ],
       );
 }
 
@@ -131,48 +118,67 @@ class _PermissionPage extends StatelessWidget {
   final VoidCallback onContinue;
 
   @override
-  Widget build(BuildContext context) => Padding(
+  Widget build(BuildContext context) => _SetupPage(
+        icon: Icons.phonelink_outlined,
+        title: 'Before you pair',
+        message:
+            'ShadowPlay needs access to your PC and, if you scan a code, your camera.',
+        action:
+            FilledButton(onPressed: onContinue, child: const Text('Continue')),
+        children: const [
+          ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.wifi),
+              title: Text('Local network'),
+              subtitle: Text('Find and connect to your PC on the same Wi-Fi.')),
+          ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.camera_alt_outlined),
+              title: Text('Camera'),
+              subtitle: Text(
+                  'Only used to scan the one-time QR code. Manual pairing does not need it.')),
+        ],
+      );
+}
+
+class _SetupPage extends StatelessWidget {
+  const _SetupPage(
+      {required this.icon,
+      required this.title,
+      required this.message,
+      required this.action,
+      this.children = const []});
+  final IconData icon;
+  final String title;
+  final String message;
+  final Widget action;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => ListView(
         padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Icon(
-                Icons.shield_outlined,
-                size: 52,
-                color: Theme.of(context).colorScheme.onPrimaryContainer,
-              ),
-            ),
-            const SizedBox(height: 28),
-            Text(
-              'Before You Pair',
+        children: [
+          const SizedBox(height: 24),
+          Align(
+              alignment: Alignment.centerLeft,
+              child: Icon(icon,
+                  size: 36, color: Theme.of(context).colorScheme.primary)),
+          const SizedBox(height: 24),
+          Text(title,
               style: Theme.of(context)
                   .textTheme
-                  .headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'You may see two permission prompts. Camera access is only used to scan the one-time QR code. Local Network access lets ShadowPlay reach your PC on the same Wi-Fi. Manual pairing does not need the camera.',
-              textAlign: TextAlign.center,
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          Text(message,
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    height: 1.45,
-                  ),
-            ),
-            const Spacer(),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                  onPressed: onContinue, child: const Text('Continue')),
-            ),
-          ],
-        ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  height: 1.45)),
+          const SizedBox(height: 24),
+          ...children,
+          const SizedBox(height: 24),
+          action,
+        ],
       );
 }
 
@@ -358,7 +364,7 @@ class _PairingPageState extends State<_PairingPage> {
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(8),
         ),
         child: Column(
           children: [
@@ -388,7 +394,7 @@ class _PairingPageState extends State<_PairingPage> {
       return Column(
         children: [
           ClipRRect(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(8),
             child: SizedBox(
               height: 300,
               child: MobileScanner(
@@ -414,7 +420,7 @@ class _PairingPageState extends State<_PairingPage> {
       children: [
         const SizedBox(height: 20),
         Icon(Icons.qr_code_2,
-            size: 108, color: Theme.of(context).colorScheme.primary),
+            size: 64, color: Theme.of(context).colorScheme.primary),
         const SizedBox(height: 20),
         const Text('Scan the one-time QR code shown in ShadowPlay on your PC.',
             textAlign: TextAlign.center),
@@ -608,41 +614,12 @@ class _SuccessPage extends StatelessWidget {
   final Future<void> Function() onContinue;
 
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: const BoxDecoration(
-                  color: Color(0xFFE3F5E8), shape: BoxShape.circle),
-              child:
-                  const Icon(Icons.check, size: 52, color: Color(0xFF2E9D59)),
-            ),
-            const SizedBox(height: 28),
-            Text(
-              'Success!',
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineMedium
-                  ?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Your phone is connected to $computerName.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-            const Spacer(),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                  onPressed: onContinue, child: const Text('Continue to App')),
-            ),
-          ],
-        ),
+  Widget build(BuildContext context) => _SetupPage(
+        icon: Icons.check_circle_outline,
+        title: 'PC paired',
+        message:
+            'Your phone is connected to $computerName. Open Clips to choose recordings to download.',
+        action: FilledButton(
+            onPressed: onContinue, child: const Text('Continue to App')),
       );
 }

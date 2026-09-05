@@ -19,12 +19,12 @@ void main() {
     final state = AppState.forTesting(preferences);
     await tester.pumpWidget(ShadowPlayApp(state: state));
 
-    expect(find.text('Get Started'), findsOneWidget);
+    expect(find.text('Your recordings. On your phone.'), findsOneWidget);
     expect(find.text('Open Camera'), findsNothing);
 
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
-    expect(find.text('Before You Pair'), findsOneWidget);
+    expect(find.text('Before you pair'), findsOneWidget);
     expect(find.text('Open Camera'), findsNothing);
 
     await tester.tap(find.text('Continue'));
@@ -79,7 +79,7 @@ void main() {
     expect(find.text('Download 3 clips'), findsOneWidget);
   });
 
-  testWidgets('Clips grid supports multi-selection inside the real shell',
+  testWidgets('Clips library supports multi-selection inside the real shell',
       (tester) async {
     final preferences = await SharedPreferences.getInstance();
     final connection = Connection(
@@ -140,13 +140,13 @@ void main() {
     await tester.tap(find.text('Settings'));
     await tester.pump();
 
-    expect(find.text('PAIRED DEVICES'), findsOneWidget);
+    expect(find.text('Paired PCs'), findsOneWidget);
     expect(find.text('Pair a New Device'), findsOneWidget);
-    expect(find.text('DOWNLOADS / STORAGE'), findsOneWidget);
+    expect(find.text('Downloads'), findsOneWidget);
 
     await tester.drag(find.byType(ListView), const Offset(0, -900));
     await tester.pumpAndSettle();
-    expect(find.text('APPEARANCE / APP'), findsOneWidget);
-    expect(find.text('ABOUT'), findsOneWidget);
+    expect(find.text('Appearance'), findsOneWidget);
+    expect(find.text('About'), findsOneWidget);
   });
 }
