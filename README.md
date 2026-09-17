@@ -138,6 +138,7 @@ Note: newly added files appear after ~6–9 seconds (stability window), by desig
 | `GET /clips` | bearer | Clip metadata, newest first |
 | `GET /clips/{id}` | bearer | Single clip metadata |
 | `GET /clips/{id}/download` | bearer | Streamed `video/mp4`, supports `Range` |
+| `GET /clips/{id}/thumbnail` | bearer | Authenticated JPEG preview when available |
 
 Errors: `400` malformed request, `401` missing/bad token, `403` non-private client IP,
 `404` unknown id/route, `409` invalid/expired/reused pairing code, `500` unexpected.
@@ -300,12 +301,11 @@ configuration; configure a release keystore separately before treating that APK 
 
 ## Out of scope (for now)
 
-- The iOS app itself
 - Cloud storage, accounts, telemetry, external servers — there are none
-- Automatic uploading/syncing, video editing, re-encoding, thumbnails
+- Automatic uploading/syncing, video editing, or re-encoding
 - Other recording providers (OBS, console capture, …)
 - Microsoft Store packaging
-- Automatic firewall changes, launch-at-startup
+- Launch-at-startup
 - HTTPS transport (structured for, not yet implemented)
 
 ## Repository layout
