@@ -400,6 +400,21 @@ class AppState extends ChangeNotifier {
     return false;
   }
 
+  Future<void> deleteDownloadedClip(DownloadedClip clip) async {
+    final file = File(clip.localPath);
+    if (await file.exists()) {
+      try {
+        await file.delete();
+      } catch (_) {}
+    }
+    downloadedClips.removeWhere((item) => item.id == clip.id);
+    downloadFailures.remove(clip.id);
+    gallerySaveFailures.remove(clip.id);
+    gallerySavedIds.remove(clip.id);
+    await _saveDownloads();
+    notifyListeners();
+  }
+
   Future<void> clearDownloadedClips() async {
     for (final clip in downloadedClips) {
       final file = File(clip.localPath);

@@ -219,8 +219,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               applicationName: 'ShadowPlay',
               applicationVersion: '0.1.0 (1)',
               children: const [
+                SizedBox(height: 12),
                 Text(
-                    'A private LAN client for downloading original game clips from your paired PC.'),
+                  'Local Wi-Fi transfer only. ShadowPlay transfers original game recordings directly between your PC and phone without cloud servers, accounts, or internet uploads.',
+                ),
               ],
             ),
           ),

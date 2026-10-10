@@ -54,6 +54,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  void _selectTab(int index) {
+    setState(() => _index = index);
+    if (index == 1) widget.state.refreshClips(silent: true);
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
         body: SafeArea(
@@ -61,7 +66,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           child: IndexedStack(
             index: _index,
             children: [
-              HomeScreen(state: widget.state),
+              HomeScreen(
+                state: widget.state,
+                onViewRecordings: () => _selectTab(1),
+              ),
               ClipsScreen(state: widget.state),
               SettingsScreen(state: widget.state),
             ],
@@ -69,10 +77,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         ),
         bottomNavigationBar: NavigationBar(
           selectedIndex: _index,
-          onDestinationSelected: (index) {
-            setState(() => _index = index);
-            if (index == 1) widget.state.refreshClips(silent: true);
-          },
+          onDestinationSelected: _selectTab,
           destinations: [
             const NavigationDestination(
               icon: Icon(Icons.home_outlined),

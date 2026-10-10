@@ -17,6 +17,7 @@ dependencies:
   flutter_secure_storage: ^11.0.0
   video_player: ^2.10.0
   gal: ^2.3.3
+  share_plus: ^13.3.0
 
 dev_dependencies:
   flutter_test:

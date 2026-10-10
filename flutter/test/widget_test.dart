@@ -149,4 +149,87 @@ void main() {
     expect(find.text('Appearance'), findsOneWidget);
     expect(find.text('About'), findsOneWidget);
   });
+
+  testWidgets('Home screen displays focused card and View recordings switches tab',
+      (tester) async {
+    final preferences = await SharedPreferences.getInstance();
+    final connection = Connection(
+      serverId: 'server-1',
+      computerName: 'GAMING-PC',
+      address: '192.168.1.20',
+      port: 5177,
+    );
+    final state = AppState.forTesting(
+      preferences,
+      connections: [connection],
+      activeServerId: connection.serverId,
+      onboardingCompleted: true,
+      remoteClips: [
+        Clip(
+          id: 'c1',
+          fileName: 'Ace.mp4',
+          sizeBytes: 1000,
+          lastWriteTimeUtc: DateTime.utc(2026, 8, 28),
+        ),
+      ],
+    );
+    state.deviceStatuses[connection.serverId] = const DeviceStatus.online();
+
+    await tester.pumpWidget(MaterialApp(home: MainShell(state: state)));
+    await tester.pump();
+
+    expect(find.text('1 new recording available'), findsOneWidget);
+    expect(find.text('View recordings'), findsOneWidget);
+
+    await tester.tap(find.text('View recordings'));
+    await tester.pump();
+
+    expect(find.text('PC Recordings'), findsOneWidget);
+  });
+
+  testWidgets('Delete local copy shows confirmation dialog reassuring original file stays on PC',
+      (tester) async {
+    final preferences = await SharedPreferences.getInstance();
+    final connection = Connection(
+      serverId: 'server-1',
+      computerName: 'GAMING-PC',
+      address: '192.168.1.20',
+      port: 5177,
+    );
+    final downloaded = DownloadedClip(
+      id: 'd1',
+      fileName: 'Clutch.mp4',
+      sizeBytes: 2000,
+      lastWriteTimeUtc: DateTime.utc(2026, 8, 28),
+      localPath: 'non-existent-clutch.mp4',
+    );
+    final state = AppState.forTesting(
+      preferences,
+      connections: [connection],
+      activeServerId: connection.serverId,
+      onboardingCompleted: true,
+      downloadedClips: [downloaded],
+    );
+
+    await tester.pumpWidget(MaterialApp(home: MainShell(state: state)));
+    await tester.pump();
+
+    expect(find.text('Clutch.mp4'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('More actions'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete local copy'), findsOneWidget);
+    await tester.tap(find.text('Delete local copy'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete local copy?'), findsOneWidget);
+    expect(find.textContaining('The original recording remains safe on GAMING-PC.'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Delete'));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+
+    expect(state.downloadedClips, isEmpty);
+  });
 }

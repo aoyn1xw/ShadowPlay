@@ -378,6 +378,25 @@ void main() {
     expect(state.downloadedClips, contains(clip));
     expect(state.gallerySaveFailures['clip-2'], contains('not granted'));
   });
+
+  test('deleteDownloadedClip removes the local copy from state', () async {
+    final preferences = await SharedPreferences.getInstance();
+    final clip = DownloadedClip(
+      id: 'clip-delete',
+      fileName: 'DeleteMe.mp4',
+      sizeBytes: 200,
+      lastWriteTimeUtc: DateTime.utc(2026, 8, 28),
+      localPath: 'non-existent-delete.mp4',
+    );
+    final state = AppState.forTesting(
+      preferences,
+      downloadedClips: [clip],
+    );
+
+    expect(state.downloadedClips, contains(clip));
+    await state.deleteDownloadedClip(clip);
+    expect(state.downloadedClips, isNot(contains(clip)));
+  });
 }
 
 class _FakeMediaGallery implements MediaGallery {
