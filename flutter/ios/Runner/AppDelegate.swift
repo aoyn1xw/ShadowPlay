@@ -11,6 +11,7 @@ private enum HighFrameRateVideoExportError: LocalizedError {
   case exportSessionUnavailable
   case unsupportedOutputType
   case metadataVerificationFailed
+  case timingVerificationFailed(String)
 
   var errorDescription: String? {
     switch self {
@@ -24,14 +25,61 @@ private enum HighFrameRateVideoExportError: LocalizedError {
       return "iOS cannot write this video container without re-encoding."
     case .metadataVerificationFailed:
       return "iOS did not preserve the full-frame-rate metadata in the export."
+    case .timingVerificationFailed(let details):
+      return "iOS changed the video timing during the export: \(details)"
     }
   }
+}
+
+/// Seconds of a CMTime, or nil when the time is invalid or non-numeric.
+private func hfrSeconds(_ time: CMTime) -> Double? {
+  guard time.isValid, time.isNumeric else { return nil }
+  let seconds = time.seconds
+  return seconds.isFinite ? seconds : nil
+}
+
+/// NaN-safe absolute difference between two optional seconds values; nil when
+/// either side is unknown.
+private func hfrAbsoluteDelta(_ lhs: Double?, _ rhs: Double?) -> Double? {
+  guard let lhs, let rhs else { return nil }
+  return abs(lhs - rhs)
+}
+
+/// Decimal seconds for logs and reports; "unknown" when the value is missing.
+private func hfrDescription(_ seconds: Double?) -> String {
+  guard let seconds else { return "unknown" }
+  return String(format: "%.6f", seconds)
+}
+
+/// Codec fourCC as text: "avc1" for printable codes, hex otherwise.
+private func hfrMediaSubTypeName(_ mediaSubType: FourCC?) -> String? {
+  guard let mediaSubType else { return nil }
+  let bytes = [
+    UInt8(truncatingIfNeeded: mediaSubType >> 24),
+    UInt8(truncatingIfNeeded: mediaSubType >> 16),
+    UInt8(truncatingIfNeeded: mediaSubType >> 8),
+    UInt8(truncatingIfNeeded: mediaSubType),
+  ]
+  guard bytes.allSatisfy({ (32...126).contains($0) }) else {
+    return String(format: "0x%08x", mediaSubType)
+  }
+  return String(bytes: bytes, encoding: .ascii)
+}
+
+/// Timing facts reloaded from one of the files involved in an HFR export.
+private struct HFRTimingSnapshot {
+  let durationSeconds: Double?
+  let nominalFrameRate: Float
+  let minimumFrameDurationSeconds: Double?
+  let mediaSubTypeName: String?
 }
 
 #if DEBUG
 private final class HFRDiagnosticReport {
   let sourcePath: String
   let sourceSize: Int64
+  let sourceDurationSeconds: Double?
+  let sourceMediaSubTypeName: String?
   let nominalFrameRate: Float
   let minimumFrameRate: Float
   let detectedFrameRate: Float
@@ -40,9 +88,14 @@ private final class HFRDiagnosticReport {
 
   var exportStatus = "pending"
   var outputSize: Int64 = 0
+  var outputDurationSeconds: Double?
+  var outputNominalFrameRate: Float?
+  var outputMinimumFrameDurationSeconds: Double?
+  var outputMediaSubTypeName: String?
   var metadataFound = false
   var verifiedValue = "not checked"
   var verifiedDataType = "not checked"
+  var timingVerdict = "not checked"
   var diagnosticPath = "not created"
   var photosHandoff = "not handed to Photos"
   var photosSave = "not reported"
@@ -51,6 +104,8 @@ private final class HFRDiagnosticReport {
   init(
     sourcePath: String,
     sourceSize: Int64,
+    sourceDuration: CMTime,
+    sourceMediaSubTypeName: String?,
     nominalFrameRate: Float,
     minimumFrameRate: Float,
     detectedFrameRate: Float,
@@ -59,6 +114,8 @@ private final class HFRDiagnosticReport {
   ) {
     self.sourcePath = sourcePath
     self.sourceSize = sourceSize
+    self.sourceDurationSeconds = hfrSeconds(sourceDuration)
+    self.sourceMediaSubTypeName = sourceMediaSubTypeName
     self.nominalFrameRate = nominalFrameRate
     self.minimumFrameRate = minimumFrameRate
     self.detectedFrameRate = detectedFrameRate
@@ -72,6 +129,8 @@ private final class HFRDiagnosticReport {
     source path: \(sourcePath)
     source file name: \(URL(fileURLWithPath: sourcePath).lastPathComponent)
     source file size: \(sourceSize) bytes
+    source duration: \(hfrDescription(sourceDurationSeconds)) seconds
+    source video codec: \(sourceMediaSubTypeName ?? "unknown")
     detected nominal frame rate: \(nominalFrameRate) fps
     detected minimum frame rate: \(minimumFrameRate) fps
     detected effective frame rate: \(detectedFrameRate) fps
@@ -80,6 +139,15 @@ private final class HFRDiagnosticReport {
     output path handed to Photos: \(outputPath)
     export status: \(exportStatus)
     output file size: \(outputSize) bytes
+    output duration: \(hfrDescription(outputDurationSeconds)) seconds
+    output nominal frame rate: \(
+      outputNominalFrameRate.map { String(format: "%.3f", $0) } ?? "unknown"
+    ) fps
+    output minimum frame duration: \(
+      hfrDescription(outputMinimumFrameDurationSeconds)
+    ) seconds
+    output video codec: \(outputMediaSubTypeName ?? "unknown")
+    timing verification: \(timingVerdict)
     FullFrameRatePlaybackIntent found after reopening: \(metadataFound)
     verified metadata value: \(verifiedValue)
     verified metadata datatype: \(verifiedDataType)
@@ -155,6 +223,17 @@ private final class HighFrameRateVideoExporter {
       return sourceURL.path
     }
 
+    let sourceDuration = try await asset.load(.duration)
+    let sourceFormatDescriptions = try await videoTrack.load(
+      .formatDescriptions
+    )
+    let sourceMediaSubType = sourceFormatDescriptions.first.map(
+      CMFormatDescriptionGetMediaSubType
+    )
+    logger.info(
+      "source duration=\(hfrDescription(hfrSeconds(sourceDuration))) codec=\(hfrMediaSubTypeName(sourceMediaSubType) ?? "unknown", privacy: .public)"
+    )
+
     guard let exportSession = AVAssetExportSession(
       asset: asset,
       presetName: AVAssetExportPresetPassthrough
@@ -191,6 +270,8 @@ private final class HighFrameRateVideoExporter {
     let diagnosticReport = HFRDiagnosticReport(
       sourcePath: sourceURL.path,
       sourceSize: sourceSize,
+      sourceDuration: sourceDuration,
+      sourceMediaSubTypeName: hfrMediaSubTypeName(sourceMediaSubType),
       nominalFrameRate: nominalFrameRate,
       minimumFrameRate: minimumFrameRate,
       detectedFrameRate: detectedFrameRate,
@@ -240,16 +321,36 @@ private final class HighFrameRateVideoExporter {
         at: outputURL,
         identifier: intentIdentifier
       )
-
 #if DEBUG
+      let outputTiming = try await verifyTimingPreserved(
+        sourceDuration: sourceDuration,
+        sourceNominalFrameRate: nominalFrameRate,
+        sourceMinimumFrameDuration: minimumFrameDuration,
+        sourceMediaSubType: sourceMediaSubType,
+        at: outputURL
+      )
       diagnosticReport.metadataFound = true
       diagnosticReport.verifiedValue = "1"
       diagnosticReport.verifiedDataType = kCMMetadataBaseDataType_UInt8 as String
+      diagnosticReport.timingVerdict = "passed"
+      diagnosticReport.outputDurationSeconds = outputTiming.durationSeconds
+      diagnosticReport.outputNominalFrameRate = outputTiming.nominalFrameRate
+      diagnosticReport.outputMinimumFrameDurationSeconds =
+        outputTiming.minimumFrameDurationSeconds
+      diagnosticReport.outputMediaSubTypeName = outputTiming.mediaSubTypeName
       diagnosticReport.diagnosticPath = outputURL.path
       logger.info(
         "diagnostic MP4 path=\(outputURL.path, privacy: .public) exactPhotosPath=true"
       )
       writeDiagnosticReport(diagnosticReport)
+#else
+      try await verifyTimingPreserved(
+        sourceDuration: sourceDuration,
+        sourceNominalFrameRate: nominalFrameRate,
+        sourceMinimumFrameDuration: minimumFrameDuration,
+        sourceMediaSubType: sourceMediaSubType,
+        at: outputURL
+      )
 #endif
 
       return outputURL.path
@@ -257,6 +358,10 @@ private final class HighFrameRateVideoExporter {
 #if DEBUG
       diagnosticReport.exportStatus = "failure"
       diagnosticReport.nativeError = error.localizedDescription
+      if let exportError = error as? HighFrameRateVideoExportError,
+        case .timingVerificationFailed = exportError {
+        diagnosticReport.timingVerdict = "failed"
+      }
       writeDiagnosticReport(diagnosticReport)
 #endif
       try? FileManager.default.removeItem(at: outputURL)
@@ -292,6 +397,97 @@ private final class HighFrameRateVideoExporter {
     logger.info(
       "metadata verification=passed identifier=\(String(describing: identifier), privacy: .public) value=1 dataType=\(expectedDataType, privacy: .public)"
     )
+  }
+
+  /// Reopens the exported file and re-measures it with AVFoundation so a
+  /// passthrough export is proven to have kept the source's timing and codec.
+  private func verifyTimingPreserved(
+    sourceDuration: CMTime,
+    sourceNominalFrameRate: Float,
+    sourceMinimumFrameDuration: CMTime,
+    sourceMediaSubType: FourCC?,
+    at outputURL: URL
+  ) async throws -> HFRTimingSnapshot {
+    let exportedAsset = AVURLAsset(url: outputURL)
+    let exportedTracks = try await exportedAsset.loadTracks(withMediaType: .video)
+    guard let exportedTrack = exportedTracks.first else {
+      logger.error("timing verification=failed reason=no-video-track")
+      throw HighFrameRateVideoExportError.timingVerificationFailed(
+        "the exported file has no video track"
+      )
+    }
+    let exportedDuration = try await exportedAsset.load(.duration)
+    let exportedNominalFrameRate = try await exportedTrack.load(.nominalFrameRate)
+    let exportedMinimumFrameDuration = try await exportedTrack.load(
+      .minFrameDuration
+    )
+    let formatDescriptions = try await exportedTrack.load(.formatDescriptions)
+    let exportedMediaSubType = formatDescriptions.first.map(
+      CMFormatDescriptionGetMediaSubType
+    )
+
+    let output = HFRTimingSnapshot(
+      durationSeconds: hfrSeconds(exportedDuration),
+      nominalFrameRate: exportedNominalFrameRate,
+      minimumFrameDurationSeconds: hfrSeconds(exportedMinimumFrameDuration),
+      mediaSubTypeName: hfrMediaSubTypeName(exportedMediaSubType)
+    )
+
+    var mismatches: [String] = []
+    // Container timescales (for example 600 or 165000) can shift recorded
+    // durations by a small fraction of a frame, so tolerate at most half a
+    // source frame or 2 ms, whichever is larger.
+    let halfSourceFrameSeconds =
+      hfrSeconds(sourceMinimumFrameDuration)
+      .map { max(0.002, $0 / 2) } ?? 0.002
+
+    let durationDelta = hfrAbsoluteDelta(
+      hfrSeconds(sourceDuration),
+      output.durationSeconds
+    )
+    if let durationDelta, durationDelta > halfSourceFrameSeconds {
+      mismatches.append(
+        "duration source=\(hfrDescription(hfrSeconds(sourceDuration))) output=\(hfrDescription(output.durationSeconds))"
+      )
+    }
+
+    let minimumFrameDurationDelta = hfrAbsoluteDelta(
+      hfrSeconds(sourceMinimumFrameDuration),
+      output.minimumFrameDurationSeconds
+    )
+    if let minimumFrameDurationDelta,
+      minimumFrameDurationDelta > halfSourceFrameSeconds {
+      mismatches.append(
+        "minimumFrameDuration source=\(hfrDescription(hfrSeconds(sourceMinimumFrameDuration))) output=\(hfrDescription(output.minimumFrameDurationSeconds))"
+      )
+    }
+
+    // nominalFrameRate is negative when unknown; only compare recorded values.
+    if sourceNominalFrameRate > 0,
+      abs(Double(sourceNominalFrameRate - output.nominalFrameRate)) > 0.5 {
+      mismatches.append(
+        "nominalFrameRate source=\(String(format: "%.3f", sourceNominalFrameRate)) output=\(String(format: "%.3f", output.nominalFrameRate))"
+      )
+    }
+
+    if let sourceMediaSubType, let exportedMediaSubType,
+      sourceMediaSubType != exportedMediaSubType {
+      // A different codec fourCC means the export re-encoded the video.
+      mismatches.append(
+        "codec source=\(hfrMediaSubTypeName(sourceMediaSubType) ?? "unknown") output=\(hfrMediaSubTypeName(exportedMediaSubType) ?? "unknown")"
+      )
+    }
+
+    if !mismatches.isEmpty {
+      let details = mismatches.joined(separator: "; ")
+      logger.error("timing verification=failed \(details, privacy: .public)")
+      throw HighFrameRateVideoExportError.timingVerificationFailed(details)
+    }
+
+    logger.info(
+      "timing verification=passed duration=\(hfrDescription(output.durationSeconds)) nominal=\(String(format: "%.3f", output.nominalFrameRate)) minimum=\(hfrDescription(output.minimumFrameDurationSeconds)) codec=\(output.mediaSubTypeName ?? "unknown", privacy: .public)"
+    )
+    return output
   }
 
   func recordPhotosSaveResult(
