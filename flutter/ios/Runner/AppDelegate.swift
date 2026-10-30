@@ -52,7 +52,7 @@ private func hfrDescription(_ seconds: Double?) -> String {
 }
 
 /// Codec fourCC as text: "avc1" for printable codes, hex otherwise.
-private func hfrMediaSubTypeName(_ mediaSubType: FourCC?) -> String? {
+private func hfrMediaSubTypeName(_ mediaSubType: FourCharCode?) -> String? {
   guard let mediaSubType else { return nil }
   let bytes = [
     UInt8(truncatingIfNeeded: mediaSubType >> 24),
@@ -405,7 +405,7 @@ private final class HighFrameRateVideoExporter {
     sourceDuration: CMTime,
     sourceNominalFrameRate: Float,
     sourceMinimumFrameDuration: CMTime,
-    sourceMediaSubType: FourCC?,
+    sourceMediaSubType: FourCharCode?,
     at outputURL: URL
   ) async throws -> HFRTimingSnapshot {
     let exportedAsset = AVURLAsset(url: outputURL)
