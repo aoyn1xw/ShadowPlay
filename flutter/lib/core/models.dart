@@ -35,6 +35,8 @@ class ServerInfo {
     this.serverVersion,
     this.apiVersion = 1,
     this.capabilities = const {},
+    this.httpsPort,
+    this.httpsCertSha256,
   });
 
   factory ServerInfo.fromJson(Map<String, dynamic> json) => ServerInfo(
@@ -48,6 +50,8 @@ class ServerInfo {
         capabilities: ((json['capabilities'] as List<dynamic>?) ?? const [])
             .whereType<String>()
             .toSet(),
+        httpsPort: (json['httpsPort'] as num?)?.toInt(),
+        httpsCertSha256: json['httpsCertSha256'] as String?,
       );
 
   final String serverId;
@@ -56,6 +60,14 @@ class ServerInfo {
   final String? serverVersion;
   final int apiVersion;
   final Set<String> capabilities;
+
+  /// Port of the pinned-TLS listener advertised by this server, if any.
+  final int? httpsPort;
+
+  /// SHA-256 fingerprint (hex) of the server's leaf certificate. Trust in this
+  /// value is established at pairing time via the QR code; TLS is then pinned
+  /// against it. Null means the server does not offer TLS.
+  final String? httpsCertSha256;
 
   bool supports(String capability) => capabilities.contains(capability);
 }
@@ -67,11 +79,15 @@ class PairingPayload {
     required this.address,
     required this.port,
     required this.code,
+    this.httpsPort,
+    this.certSha256,
   });
 
   factory PairingPayload.fromJson(Map<String, dynamic> json) {
-    if (json['v'] != 1) {
-      throw const FormatException('Unsupported pairing protocol.');
+    final version = json['v'];
+    if (version is! num || (version.toInt() != 1 && version.toInt() != 2)) {
+      throw const FormatException(
+          'Unsupported pairing protocol. Update the mobile app.');
     }
     return PairingPayload(
       serverId: json['serverId'] as String,
@@ -79,6 +95,8 @@ class PairingPayload {
       address: json['lanAddress'] as String,
       port: (json['port'] as num).toInt(),
       code: json['pairingCode'] as String,
+      httpsPort: (json['httpsPort'] as num?)?.toInt(),
+      certSha256: json['certSha256'] as String?,
     );
   }
 
@@ -87,6 +105,36 @@ class PairingPayload {
   final String address;
   final int port;
   final String code;
+
+  /// Pinned-TLS listener port. Null/zero for v1 (legacy, plain HTTP) payloads.
+  final int? httpsPort;
+
+  /// SHA-256 fingerprint (hex) of the server certificate, pinned from the QR
+  /// code itself. Trust in this value is established before any TLS handshake.
+  final String? certSha256;
+
+  bool get tlsPinned =>
+      httpsPort != null && httpsPort! > 0 && _isValidFingerprint(certSha256);
+
+  bool get usesLegacyHttp => !tlsPinned;
+}
+
+/// Validates the shape of a hex SHA-256 fingerprint.
+bool _isValidFingerprint(String? value) {
+  if (value == null) return false;
+  final cleaned = value.replaceAll(':', '').trim().toLowerCase();
+  if (cleaned.length != 64) return false;
+  return cleaned.codeUnits.every((unit) =>
+      (unit >= 0x30 && unit <= 0x39) ||
+      (unit >= 0x61 && unit <= 0x66) ||
+      (unit >= 0x41 && unit <= 0x46));
+}
+
+/// Normalizes a fingerprint to lowercase plain hex, or returns null when the
+/// value is not a valid 64-character hex SHA-256 digest.
+String? normalizeFingerprint(String? value) {
+  if (!_isValidFingerprint(value)) return null;
+  return value!.replaceAll(':', '').trim().toLowerCase();
 }
 
 class Connection {
@@ -96,6 +144,8 @@ class Connection {
     required this.address,
     required this.port,
     this.lastSeenUtc,
+    this.httpsPort,
+    this.certSha256,
   });
 
   factory Connection.fromJson(Map<String, dynamic> json) => Connection(
@@ -106,6 +156,8 @@ class Connection {
         lastSeenUtc: json['lastSeenUtc'] == null
             ? null
             : DateTime.tryParse(json['lastSeenUtc'] as String),
+        httpsPort: (json['httpsPort'] as num?)?.toInt(),
+        certSha256: json['certSha256'] as String?,
       );
 
   final String serverId;
@@ -114,12 +166,26 @@ class Connection {
   int port;
   DateTime? lastSeenUtc;
 
+  /// Pinned-TLS listener port. Null when this connection is legacy plain-HTTP
+  /// (paired from a v1 QR/pairing exchange or never upgraded).
+  int? httpsPort;
+
+  /// SHA-256 fingerprint of the server certificate, pinned at pairing time or
+  /// adopted from a trusted server-info response. Never downgrade TLS once
+  /// set — a connection here speaks HTTPS only.
+  String? certSha256;
+
+  bool get usesTls =>
+      httpsPort != null && httpsPort! > 0 && (certSha256?.isNotEmpty ?? false);
+
   Map<String, dynamic> toJson() => {
         'serverId': serverId,
         'computerName': computerName,
         'address': address,
         'port': port,
         'lastSeenUtc': lastSeenUtc?.toIso8601String(),
+        if (httpsPort != null) 'httpsPort': httpsPort,
+        if (certSha256 != null) 'certSha256': certSha256,
       };
 }
 

@@ -248,6 +248,8 @@ class _PairingPageState extends State<_PairingPage> {
         });
         unawaited(_runPreflight());
       } catch (_) {
+        widget.state.diagnostics
+            .warning('pairing', 'Scanned payload is not a valid pairing QR');
         setState(
             () => _error = 'That is not a valid ShadowPlay pairing QR code.');
       }
@@ -265,6 +267,10 @@ class _PairingPageState extends State<_PairingPage> {
       setState(() => _error = 'Enter the PC address, port, and pairing code.');
       return;
     }
+    final pin = _payload?.tlsPinned == true
+        ? normalizeFingerprint(_payload!.certSha256)
+        : null;
+    final tlsPort = pin != null ? _payload!.httpsPort : null;
     setState(() {
       _busy = true;
       _error = null;
@@ -272,14 +278,26 @@ class _PairingPageState extends State<_PairingPage> {
     try {
       final response = await ShadowPlayApi.pair(
         address: _address.text.trim(),
-        port: port,
+        port: tlsPort ?? port,
         code: _code.text.replaceAll(' ', '-').toUpperCase(),
         deviceName:
             _deviceName.text.trim().isEmpty ? 'Phone' : _deviceName.text.trim(),
+        useTls: pin != null,
+        pinnedCertSha256: pin,
       );
-      await widget.state.addPaired(response, _address.text.trim(), port);
+      await widget.state.addPaired(
+        response,
+        _address.text.trim(),
+        tlsPort ?? port,
+        httpsPort: tlsPort,
+        certSha256: pin,
+      );
       if (mounted) widget.onPaired();
     } catch (error) {
+      widget.state.diagnostics.warning('pairing', 'Pairing rejected', {
+        'address': _address.text.trim(),
+        'error': error.toString(),
+      });
       if (mounted) setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -517,10 +535,18 @@ class _PairingPageState extends State<_PairingPage> {
       _permissionState = AppPermissionState.requestingPermission;
       _error = null;
     });
+    final pin = _payload?.tlsPinned == true
+        ? normalizeFingerprint(_payload!.certSha256)
+        : null;
+    final tlsPort = pin != null ? _payload!.httpsPort : null;
     try {
       final permission =
           await _localNetworkPermissions.requestLocalNetworkAccess();
       if (permission != AppPermissionState.granted) {
+        widget.state.diagnostics.warning('pairing',
+            'Local Network permission not granted before preflight', {
+          'state': permission.name,
+        });
         if (mounted) {
           setState(() {
             _permissionState = permission;
@@ -534,9 +560,21 @@ class _PairingPageState extends State<_PairingPage> {
       if (mounted) {
         setState(() => _permissionState = AppPermissionState.granted);
       }
-      await ShadowPlayApi.health(address: _address.text.trim(), port: port);
+      await ShadowPlayApi.health(
+        address: _address.text.trim(),
+        port: tlsPort ?? port,
+        useTls: pin != null,
+        pinnedCertSha256: pin,
+      );
+      widget.state.diagnostics.info('pairing', 'PC reachable for pairing', {
+        'address': _address.text.trim(),
+        'port': tlsPort ?? port,
+        'transport': pin != null ? 'HTTPS with pinned certificate' : 'HTTP',
+      });
       if (mounted) setState(() => _preflightPassed = true);
     } catch (error) {
+      widget.state.diagnostics.warning('pairing', 'Pairing preflight failed',
+          {'address': _address.text.trim(), 'error': error.toString()});
       if (mounted) setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _preflightBusy = false);

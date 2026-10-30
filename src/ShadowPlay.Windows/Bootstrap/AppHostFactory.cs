@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ShadowPlay.Core.Clips;
 using ShadowPlay.Core.Devices;
+using ShadowPlay.Core.Networking;
 using ShadowPlay.Core.Pairing;
 using ShadowPlay.Core.Settings;
 using ShadowPlay.Core.Validation;
@@ -45,6 +46,9 @@ public static class AppHostFactory
         services.AddSingleton<IDeviceRegistry, DeviceRegistry>();
         services.AddSingleton<IPairingService, PairingService>();
         services.AddSingleton<IWindowsFirewallService, WindowsFirewallService>();
+        // Self-signed certificate for the pinned-TLS listener; resolved lazily
+        // when sharing starts and skipped (HTTP-only) when unavailable.
+        services.AddSingleton<IHttpsIdentityService, HttpsIdentityService>();
         services.AddSingleton<IClipPreviewProvider>(_ =>
             new WindowsClipPreviewProvider(Path.Combine(DefaultBaseDirectory, "thumbnails")));
         services.AddSingleton<AppController>();

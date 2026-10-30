@@ -14,9 +14,13 @@ namespace ShadowPlay.Api;
 /// Builds the self-hosted LAN API <see cref="WebApplication"/>. Structured so that
 /// transport details (Kestrel vs test server, HTTP vs pinned HTTPS) are isolated here.
 ///
-/// SECURITY: this MVP speaks plain HTTP on the LAN. Devices are authenticated via
-/// bearer tokens, but traffic is NOT encrypted. Pinned local HTTPS can replace this
-/// layer later without touching endpoint logic.
+/// SECURITY: two transports may run side by side.
+///  * HTTP (plain) — kept for compatibility with phones paired before pinned TLS
+///    shipped and as the bootstrap path documented in the README.
+///  * HTTPS (pinned) — self-signed certificate whose SHA-256 fingerprint is
+///    distributed via the pairing QR code and the server DTO. Clients must pin
+///    it; connection-based authentication is unchanged. A TLS-capable client
+///    never silently downgrades to HTTP.
 /// </summary>
 public static class LanApiFactory
 {
@@ -34,12 +38,29 @@ public static class LanApiFactory
         builder.Logging.ClearProviders();
         builder.Logging.SetMinimumLevel(LogLevel.Information);
 
+        // Omit null JSON properties so optional fields (e.g. the TLS
+        // advertisement on HTTP-only servers) are truly absent on the wire,
+        // which is what the mobile decoder treats as "not advertised".
+        builder.Services.ConfigureHttpJsonOptions(static jsonOptions =>
+        {
+            jsonOptions.SerializerOptions.DefaultIgnoreCondition =
+                System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+        });
+
         options.ConfigureWebHost?.Invoke(builder.WebHost);
         if (options.ConfigureWebHost is null)
         {
             builder.WebHost.UseKestrel(kestrel =>
             {
                 kestrel.Listen(IPAddress.Any, options.Port, listen => listen.Protocols = HttpProtocols.Http1);
+                if (options.HttpsCertificate is not null)
+                {
+                    kestrel.Listen(IPAddress.Any, options.HttpsPort, listen =>
+                    {
+                        listen.Protocols = HttpProtocols.Http1;
+                        listen.UseHttps(https => https.ServerCertificate = options.HttpsCertificate);
+                    });
+                }
                 kestrel.AddServerHeader = false;
             });
         }

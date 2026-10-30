@@ -6,6 +6,7 @@ import '../../core/app_state.dart';
 import '../../core/models.dart';
 import '../../shared/widgets.dart';
 import '../onboarding/onboarding_flow.dart';
+import 'diagnostics_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({required this.state, super.key});
@@ -203,6 +204,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               },
                             ),
                         ])))),
+          ),
+          const _SectionLabel('Diagnostics'),
+          SwitchListTile(
+            secondary: const Icon(Icons.bug_report_outlined),
+            title: const Text('Verbose diagnostics'),
+            subtitle:
+                const Text('Also record low-level events for troubleshooting'),
+            value: widget.state.isVerboseDiagnostics,
+            onChanged: widget.state.setVerboseDiagnostics,
+          ),
+          ListTile(
+            leading: const Icon(Icons.receipt_long_outlined),
+            title: const Text('View recent events'),
+            subtitle: Text('Local logs · '
+                '${widget.state.diagnostics.inMemoryCount} in view'),
+            onTap: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (routeContext) =>
+                      DiagnosticsScreen(state: widget.state),
+                ),
+              );
+              if (mounted) setState(() {});
+            },
           ),
           const _SectionLabel('About'),
           const ListTile(

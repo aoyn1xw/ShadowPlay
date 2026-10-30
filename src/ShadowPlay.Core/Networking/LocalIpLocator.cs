@@ -78,6 +78,58 @@ public static class LocalIpLocator
         => FindBestEndpoint()?.Address;
 
     /// <summary>
+    /// Every distinct allowed IPv4 address on live, non-loopback/tunnel
+    /// interfaces. Used to build the HTTPS certificate's subject alternative
+    /// names so any reachable LAN path can validate the identity.
+    /// </summary>
+    public static IReadOnlyCollection<IPAddress> AllowedLanIpv4Addresses()
+    {
+        var addresses = new List<IPAddress>();
+        try
+        {
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (nic.OperationalStatus != OperationalStatus.Up)
+                {
+                    continue;
+                }
+
+                if (nic.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel)
+                {
+                    continue;
+                }
+
+                foreach (var unicast in nic.GetIPProperties().UnicastAddresses)
+                {
+                    var address = unicast.Address;
+                    if (address.AddressFamily != AddressFamily.InterNetwork)
+                    {
+                        continue;
+                    }
+                    if (address.Equals(IPAddress.Loopback))
+                    {
+                        continue;
+                    }
+                    if (!IsAllowedClientAddress(address))
+                    {
+                        continue;
+                    }
+                    addresses.Add(address);
+                }
+            }
+        }
+        catch (NetworkInformationException)
+        {
+            // Best effort: return what we have.
+        }
+
+        return addresses
+            .GroupBy(address => address.ToString())
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    /// <summary>
     /// Finds the preferred IPv4 address and retains the interface metadata used for
     /// diagnostics. Interfaces with an active IPv4 gateway win over isolated virtual
     /// adapters before the private-range preference is applied.

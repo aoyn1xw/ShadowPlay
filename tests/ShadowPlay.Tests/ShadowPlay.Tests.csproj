@@ -1,7 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- Windows TFM: needed to test ShadowPlay.Windows internals (firewall
+         script generation). CI runs dotnet test on windows-latest, and all
+         other projects already target the Windows desktop stack. -->
+    <TargetFramework>net8.0-windows</TargetFramework>
     <IsPackable>false</IsPackable>
     <RootNamespace>ShadowPlay.Tests</RootNamespace>
     <!-- Test idioms: snake_case test names (CA1707) and xUnit fixture Dispose without
@@ -30,6 +33,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\ShadowPlay.Api\ShadowPlay.Api.csproj" />
     <ProjectReference Include="..\..\src\ShadowPlay.Core\ShadowPlay.Core.csproj" />
+    <ProjectReference Include="..\..\src\ShadowPlay.Windows\ShadowPlay.Windows.csproj" />
   </ItemGroup>
 
 </Project>

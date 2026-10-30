@@ -27,4 +27,10 @@
     <ProjectReference Include="..\ShadowPlay.Core\ShadowPlay.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Lets ShadowPlay.Tests verify the generated firewall netsh script
+         (internal static helper) without shelling out to PowerShell. -->
+    <InternalsVisibleTo Include="ShadowPlay.Tests" />
+  </ItemGroup>
+
 </Project>

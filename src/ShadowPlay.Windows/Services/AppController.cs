@@ -47,11 +47,18 @@ public sealed class AppController : IAsyncDisposable
     private readonly IDeviceRegistry _devices;
     private readonly IWindowsFirewallService _firewall;
     private readonly IClipPreviewProvider _clipPreview;
+    private readonly IHttpsIdentityService? _httpsIdentity;
     private readonly ILogger<AppController>? _logger;
 
     private WebApplication? _apiApp;
     private ClipMonitorService? _monitor;
     private int _actualPort;
+
+    /// <summary>Live pinned-TLS listener port; 0 when HTTPS is not active.</summary>
+    private int _actualHttpsPort;
+
+    /// <summary>SHA-256 thumbprint of the live TLS certificate; null when HTTPS is not active.</summary>
+    private string? _httpsThumbprint;
 
     public AppController(
         ISettingsService settings,
@@ -61,6 +68,7 @@ public sealed class AppController : IAsyncDisposable
         IDeviceRegistry devices,
         IWindowsFirewallService firewall,
         IClipPreviewProvider clipPreview,
+        IHttpsIdentityService? httpsIdentity = null,
         ILogger<AppController>? logger = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -70,6 +78,7 @@ public sealed class AppController : IAsyncDisposable
         _devices = devices ?? throw new ArgumentNullException(nameof(devices));
         _firewall = firewall ?? throw new ArgumentNullException(nameof(firewall));
         _clipPreview = clipPreview ?? throw new ArgumentNullException(nameof(clipPreview));
+        _httpsIdentity = httpsIdentity;
         _logger = logger;
 
         _catalog.Changed += () => StateChanged?.Invoke();
@@ -186,20 +195,41 @@ public sealed class AppController : IAsyncDisposable
             var data = _settings.Current;
             var serverInfo = new StaticServerInfo(data.ServerId, Environment.MachineName);
 
-            var apiOptions = new LanApiOptions
+            // Pinned TLS: a self-signed certificate covering the current LAN
+            // addresses. Failing to provide an identity is NOT fatal - sharing
+            // falls back to plain HTTP so existing paired phones keep working.
+            var identity = ResolveHttpsIdentity();
+
+            WebApplication app;
+            int configuredHttpsPort;
+            if (identity is not null)
             {
-                Catalog = _catalog,
-                Pairing = _pairing,
-                Devices = _devices,
-                ServerInfo = serverInfo,
-                ClipPreview = _clipPreview,
-                Port = data.Port,
-            };
+                try
+                {
+                    (app, configuredHttpsPort) = await StartApiAsync(
+                        serverInfo, identity, data.Port, tls: true).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    // The TLS listener itself failed (port conflict, store
+                    // problem). Existing pinned phones keep their HTTPS
+                    // endpoints and surface failures until the PC recovers;
+                    // legacy HTTP-only phones must keep working.
+                    _logger?.LogWarning(
+                        ex,
+                        "Starting the pinned-TLS listener failed; retrying with HTTP only on port {Port}.",
+                        data.Port);
+                    (app, configuredHttpsPort) = await StartApiAsync(
+                        serverInfo, null, data.Port, tls: false).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                (app, configuredHttpsPort) = await StartApiAsync(
+                    serverInfo, null, data.Port, tls: false).ConfigureAwait(false);
+            }
 
-            var app = LanApiFactory.Build(apiOptions);
-            await app.StartAsync().ConfigureAwait(false);
-
-            var port = ResolvePort(app);
+            var port = ResolvePort(app, "http");
             if (port is null)
             {
                 await app.StopAsync().ConfigureAwait(false);
@@ -210,20 +240,39 @@ public sealed class AppController : IAsyncDisposable
             _apiApp = app;
             _actualPort = port.Value;
 
+            // Only advertise TLS once the HTTPS listener is verified live.
+            if (configuredHttpsPort > 0)
+            {
+                _actualHttpsPort = ResolvePort(app, "https") ?? 0;
+                _httpsThumbprint = _actualHttpsPort > 0 ? identity!.Sha256Thumbprint : null;
+                if (_actualHttpsPort <= 0)
+                {
+                    _logger?.LogWarning(
+                        "The HTTPS listener did not report a bound port; TLS advertisement is disabled.");
+                }
+            }
+            else
+            {
+                _actualHttpsPort = 0;
+                _httpsThumbprint = null;
+            }
+
             var listenerAddresses = GetServerAddresses(app);
             _logger?.LogInformation(
-                "LAN API listening on {ListenerAddresses}; Kestrel bind is IPv4 wildcard (IPAddress.Any), configured port {Port}",
+                "LAN API listening on {ListenerAddresses}; HTTP TCP {HttpPort}, pinned TLS TCP {HttpsPort}",
                 string.Join(", ", listenerAddresses),
-                _actualPort);
+                _actualPort,
+                _actualHttpsPort > 0 ? _actualHttpsPort : 0);
 
             var executablePath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
             if (!string.IsNullOrWhiteSpace(executablePath))
             {
-                FirewallStatus = _firewall.Check(executablePath, _actualPort);
+                var firewallPorts = FirewallPorts();
+                FirewallStatus = _firewall.Check(executablePath, firewallPorts);
                 _logger?.LogInformation(
-                    "Firewall check for {ExecutablePath} TCP {Port}: {State}. {Detail} Private profile active: {PrivateProfileActive}",
+                    "Firewall check for {ExecutablePath} TCP {PortList}: {State}. {Detail} Private profile active: {PrivateProfileActive}",
                     executablePath,
-                    _actualPort,
+                    string.Join(", ", firewallPorts),
                     FirewallStatus.State,
                     FirewallStatus.Detail,
                     FirewallStatus.PrivateNetworkActive);
@@ -252,6 +301,83 @@ public sealed class AppController : IAsyncDisposable
         {
             _logger?.LogError(ex, "Failed to start sharing");
             SetStatus(new ControllerStatus(SharingState.Error, DescribeStartError(ex)));
+        }
+    }
+
+    private HttpsIdentity? ResolveHttpsIdentity()
+    {
+        if (_httpsIdentity is null || !OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+        var lanAddresses = LocalIpLocator.AllowedLanIpv4Addresses();
+        if (lanAddresses.Count == 0)
+        {
+            _logger?.LogInformation("No private LAN IPv4 addresses were found; the HTTPS listener is disabled.");
+            return null;
+        }
+
+        return _httpsIdentity.GetOrCreateIdentity(lanAddresses, _logger);
+    }
+
+    private async Task<(WebApplication App, int HttpsPort)> StartApiAsync(
+        IServerInfoProvider serverInfo,
+        HttpsIdentity? identity,
+        int port,
+        bool tls)
+    {
+        // HTTPS never reuses the HTTP port. Fixed ports bind port + 1; the
+        // ephemeral port 0 (tests/smoke) binds an ephemeral HTTPS port too.
+        var httpsPort = tls && identity is not null && port > 0 && port < 65535
+            ? port + 1
+            : 0;
+
+        var options = new LanApiOptions
+        {
+            Catalog = _catalog,
+            Pairing = _pairing,
+            Devices = _devices,
+            ServerInfo = serverInfo,
+            ClipPreview = _clipPreview,
+            Port = port,
+            HttpsPort = httpsPort,
+            HttpsCertificate = tls && identity is not null ? identity.Certificate : null,
+        };
+
+        var app = LanApiFactory.Build(options);
+        try
+        {
+            await app.StartAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            await DisposeAppQuietlyAsync(app).ConfigureAwait(false);
+            throw;
+        }
+
+        return (app, httpsPort);
+    }
+
+    private static async Task DisposeAppQuietlyAsync(WebApplication app)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await app.StopAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The app may never have fully started; disposal below is enough.
+        }
+
+        try
+        {
+            await app.DisposeAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            // Best effort: nothing else references this instance.
         }
     }
 
@@ -318,6 +444,17 @@ public sealed class AppController : IAsyncDisposable
             PairingCode = offer.Code,
         };
 
+        // Only advertise pinned TLS when the listener is verified live; a QR
+        // that points at a dead HTTPS port would break pairing outright.
+        if (_actualHttpsPort > 0 && !string.IsNullOrEmpty(_httpsThumbprint))
+        {
+            payload = payload with
+            {
+                HttpsPort = _actualHttpsPort,
+                CertSha256 = _httpsThumbprint,
+            };
+        }
+
         StateChanged?.Invoke();
         return payload.ToJson();
     }
@@ -332,7 +469,8 @@ public sealed class AppController : IAsyncDisposable
 
     public async Task<bool> ConfigureFirewallAsync()
     {
-        if (!IsSharingRunning || _actualPort <= 0)
+        var ports = FirewallPorts();
+        if (!IsSharingRunning || _actualPort <= 0 || ports.Length == 0)
         {
             FirewallStatus = new(
                 FirewallRuleState.Unavailable,
@@ -353,11 +491,11 @@ public sealed class AppController : IAsyncDisposable
             return false;
         }
 
-        FirewallStatus = await _firewall.EnsurePrivateRuleAsync(executablePath, _actualPort).ConfigureAwait(false);
+        FirewallStatus = await _firewall.EnsurePrivateRuleAsync(executablePath, ports).ConfigureAwait(false);
         _logger?.LogInformation(
-            "Firewall setup for {ExecutablePath} TCP {Port}: {State}. {Detail}",
+            "Firewall setup for {ExecutablePath} TCP {PortList}: {State}. {Detail}",
             executablePath,
-            _actualPort,
+            string.Join(", ", ports),
             FirewallStatus.State,
             FirewallStatus.Detail);
         StateChanged?.Invoke();
@@ -395,21 +533,39 @@ public sealed class AppController : IAsyncDisposable
                 _apiApp = null;
             }
         }
+
+        // TLS state belongs to the (now stopped) listener; the QR must not
+        // advertise a pin while sharing is paused.
+        _actualHttpsPort = 0;
+        _httpsThumbprint = null;
     }
 
-    private static int? ResolvePort(WebApplication app)
+    private static int? ResolvePort(WebApplication app, string scheme)
     {
         var addresses = GetServerAddresses(app);
 
         foreach (var address in addresses)
         {
-            if (Uri.TryCreate(address, UriKind.Absolute, out var uri) && uri.Port > 0)
+            if (Uri.TryCreate(address, UriKind.Absolute, out var uri)
+                && uri.Scheme == scheme
+                && uri.Port > 0)
             {
                 return uri.Port;
             }
         }
 
         return null;
+    }
+
+    private int[] FirewallPorts()
+    {
+        var ports = new List<int> { _actualPort };
+        if (_actualHttpsPort > 0)
+        {
+            ports.Add(_actualHttpsPort);
+        }
+
+        return ports.Distinct().ToArray();
     }
 
     private static string[] GetServerAddresses(WebApplication app) =>

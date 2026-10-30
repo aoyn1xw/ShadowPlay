@@ -21,16 +21,14 @@ class _ClipsScreenState extends State<ClipsScreen> {
 
   Future<void> _downloadSelected() async {
     final available = widget.state.remoteClips;
-    final selected = available
-        .where((clip) => _selectedIds.contains(clip.id))
-        .toList();
+    final selected =
+        available.where((clip) => _selectedIds.contains(clip.id)).toList();
     await widget.state.downloadClips(selected);
     if (!mounted) return;
     setState(
         () => _selectedIds.removeWhere(widget.state.downloadedIds.contains));
-    final failures = selected
-        .where((clip) => widget.state.downloadFailures.containsKey(clip.id))
-        .length;
+    final failures =
+        selected.where((clip) => widget.state.isFailedClip(clip.id)).length;
     final galleryFailures = selected
         .where((clip) => widget.state.gallerySaveFailures.containsKey(clip.id))
         .length;
@@ -81,8 +79,7 @@ class _ClipsScreenState extends State<ClipsScreen> {
                 SliverToBoxAdapter(
                   child: LibraryHeading(
                     title: 'PC Recordings',
-                    detail:
-                        '${clips.length} available · Direct Wi-Fi transfer',
+                    detail: '${clips.length} available · Direct Wi-Fi transfer',
                   ),
                 ),
                 _content(clips),
@@ -145,15 +142,15 @@ class _ClipsScreenState extends State<ClipsScreen> {
         final clip = clips[index];
         final selected = _selectedIds.contains(clip.id);
         final isDownloaded = widget.state.downloadedIds.contains(clip.id);
-        final isDownloading =
-            widget.state.downloadProgress.containsKey(clip.id);
-        final progress = widget.state.downloadProgress[clip.id];
-        final failure = widget.state.downloadFailures[clip.id];
+        final isDownloading = widget.state.isDownloadingClip(clip.id);
+        final progress = widget.state.getProgress(widget.state.active, clip.id);
+        final failure = widget.state.getFailure(widget.state.active, clip.id);
 
         final downloadedClip = isDownloaded
             ? widget.state.downloadedClips
                 .firstWhere((item) => item.id == clip.id)
             : null;
+        final canStreamRemotely = !(widget.state.active?.usesTls ?? false);
 
         return _RemoteClipCard(
           clip: clip,
@@ -163,11 +160,16 @@ class _ClipsScreenState extends State<ClipsScreen> {
           isDownloading: isDownloading,
           progress: progress,
           failed: failure,
+          canStreamRemotely: canStreamRemotely,
+          onCancelDownload: () => widget.state.cancelDownload(clip.id),
           onTap: () {
             if (isDownloaded && downloadedClip != null) {
               Navigator.of(context).push(
                 MaterialPageRoute<void>(
-                  builder: (_) => PlayerScreen.local(clip: downloadedClip),
+                  builder: (_) => PlayerScreen.local(
+                    clip: downloadedClip,
+                    diagnostics: widget.state.diagnostics,
+                  ),
                 ),
               );
             } else if (!isDownloading) {
@@ -187,18 +189,34 @@ class _ClipsScreenState extends State<ClipsScreen> {
             if (isDownloaded && downloadedClip != null) {
               Navigator.of(context).push(
                 MaterialPageRoute<void>(
-                  builder: (_) => PlayerScreen.local(clip: downloadedClip),
+                  builder: (_) => PlayerScreen.local(
+                    clip: downloadedClip,
+                    diagnostics: widget.state.diagnostics,
+                  ),
                 ),
               );
-            } else {
-              final api = widget.state.api;
-              if (api == null) return;
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => PlayerScreen.remote(clip: clip, api: api),
-                ),
-              );
+              return;
             }
+            if (!canStreamRemotely) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                      'This PC uses an encrypted connection. Download the clip to play it on this device.'),
+                ),
+              );
+              return;
+            }
+            final api = widget.state.api;
+            if (api == null) return;
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => PlayerScreen.remote(
+                  clip: clip,
+                  api: api,
+                  diagnostics: widget.state.diagnostics,
+                ),
+              ),
+            );
           },
         );
       },
@@ -216,6 +234,8 @@ class _RemoteClipCard extends StatelessWidget {
     required this.onTap,
     required this.onDownloadSingle,
     required this.onPlay,
+    required this.onCancelDownload,
+    this.canStreamRemotely = true,
     this.progress,
     this.failed,
   });
@@ -225,11 +245,13 @@ class _RemoteClipCard extends StatelessWidget {
   final bool selected;
   final bool isDownloaded;
   final bool isDownloading;
+  final bool canStreamRemotely;
   final double? progress;
   final String? failed;
   final VoidCallback onTap;
   final VoidCallback onDownloadSingle;
   final VoidCallback onPlay;
+  final VoidCallback onCancelDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -254,13 +276,18 @@ class _RemoteClipCard extends StatelessWidget {
           Align(
             alignment: Alignment.centerLeft,
             child: IconButton(
-              tooltip: isDownloaded ? 'Play local clip' : 'Stream preview from PC',
+              tooltip: isDownloaded
+                  ? 'Play local clip'
+                  : canStreamRemotely
+                      ? 'Stream preview from PC'
+                      : 'Download to play',
               style: IconButton.styleFrom(
                 backgroundColor: Colors.black54,
                 foregroundColor: Colors.white,
               ),
               onPressed: isDownloading ? null : onPlay,
-              icon: Icon(isDownloaded ? Icons.play_circle_fill : Icons.play_arrow),
+              icon: Icon(
+                  isDownloaded ? Icons.play_circle_fill : Icons.play_arrow),
             ),
           ),
         ],
@@ -277,7 +304,8 @@ class _RemoteClipCard extends StatelessWidget {
           ? Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Chip(
-                avatar: const Icon(Icons.check_circle, size: 16, color: Color(0xFF2E9D59)),
+                avatar: const Icon(Icons.check_circle,
+                    size: 16, color: Color(0xFF2E9D59)),
                 label: const Text('Downloaded', style: TextStyle(fontSize: 11)),
                 padding: EdgeInsets.zero,
                 visualDensity: VisualDensity.compact,
@@ -285,9 +313,15 @@ class _RemoteClipCard extends StatelessWidget {
               ),
             )
           : isDownloading
-              ? const SizedBox.square(
-                  dimension: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Cancel download',
+                      onPressed: onCancelDownload,
+                      icon: const Icon(Icons.close, size: 20),
+                    ),
+                  ],
                 )
               : Row(
                   mainAxisSize: MainAxisSize.min,

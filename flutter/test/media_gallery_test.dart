@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadowplay/core/media_gallery.dart';
 
@@ -71,5 +72,34 @@ void main() {
     await gallery.saveVideo('ordinary.mp4');
 
     expect(savedPaths, ['ordinary.mp4']);
+  });
+
+  testWidgets('test seams bypass the iOS method channels', (tester) async {
+    final mediaCalls = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('shadowplay/media'),
+      (call) async {
+        mediaCalls.add(call.method);
+        return null;
+      },
+    );
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+        const MethodChannel('shadowplay/media'),
+        null,
+      ),
+    );
+
+    final gallery = GalMediaGallery(
+      accessCheck: (_) async => true,
+      iosVideoPreparer: (path) async => path,
+      videoSaver: (path, _) async => Future.value(),
+    );
+
+    await gallery.saveVideo('clip.mp4');
+
+    expect(mediaCalls, isEmpty);
   });
 }

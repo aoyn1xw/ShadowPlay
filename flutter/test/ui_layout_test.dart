@@ -105,8 +105,11 @@ void main() {
       await tester.pump();
       expect(find.text('Download 1 clip'), findsOneWidget);
       await capture(tester, 'selected-${dark ? 'dark' : 'light'}');
-      state.downloadProgress['sample-0'] = 0.42;
-      state.downloadFailures['sample-1'] = 'Connection interrupted';
+      state.downloadProgress[
+          AppState.deviceKey(state.activeServerId, 'sample-0')] = 0.42;
+      state.downloadFailures[
+              AppState.deviceKey(state.activeServerId, 'sample-1')] =
+          'Connection interrupted';
       await tester.pumpWidget(
           RepaintBoundary(key: _boundary, child: ShadowPlayApp(state: state)));
       await tester.pump();

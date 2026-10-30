@@ -17,7 +17,9 @@ public sealed record ServerDto(
     int ClipCount,
     string ServerVersion,
     int ApiVersion,
-    IReadOnlyList<string> Capabilities);
+    IReadOnlyList<string> Capabilities,
+    int? HttpsPort = null,
+    string? HttpsCertSha256 = null);
 
 public sealed record PairExchangeRequest(string? PairingCode, string? DeviceName);
 

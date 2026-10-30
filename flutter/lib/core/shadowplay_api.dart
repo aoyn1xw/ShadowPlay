@@ -2,9 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart' as http_io;
 
 import 'models.dart';
+import 'resumable_download.dart';
 
 enum ApiFailureKind {
   timeout,
@@ -13,6 +16,7 @@ enum ApiFailureKind {
   networkIsolation,
   authenticationFailure,
   apiIncompatible,
+  tlsUntrusted,
   network,
   http,
   malformedResponse,
@@ -43,12 +47,20 @@ class ShadowPlayApi {
   final Connection connection;
   final String token;
 
-  Uri _uri(String path) => Uri(
-        scheme: 'http',
-        host: connection.address,
-        port: connection.port,
-        path: '/api/v1$path',
-      );
+  // ------------------------------------------------------------------ URIs
+
+  Uri _uri(String path) {
+    final scheme = connection.usesTls ? 'https' : 'http';
+    final port = connection.usesTls
+        ? connection.httpsPort ?? connection.port
+        : connection.port;
+    return Uri(
+      scheme: scheme,
+      host: connection.address,
+      port: port,
+      path: '/api/v1$path',
+    );
+  }
 
   Map<String, String> get _headers => {'Authorization': 'Bearer $token'};
 
@@ -56,90 +68,221 @@ class ShadowPlayApi {
 
   Uri clipStreamUri(Clip clip) => _uri('/clips/${clip.id}/download');
 
-  Future<List<Clip>> clips() async {
-    final response = await _withTimeout(
-      http.get(_uri('/clips'), headers: _headers),
-      _requestTimeout,
-      _uri('/clips'),
-    );
-    _check(response.statusCode, _uri('/clips'));
-    try {
-      final body = jsonDecode(response.body);
-      if (body is! List<dynamic>) {
-        throw const FormatException('Expected a clip list.');
+  // ----------------------------------------------------------- transports
+
+  /// A `dart:io` HttpClient honouring the pinned-certificate policy of a
+  /// connection. When a pin is configured, a certificate whose SHA-256
+  /// fingerprint does not match is always rejected — connections never
+  /// silently downgrade.
+  static HttpClient ioClient({
+    required bool useTls,
+    String? pinnedCertSha256,
+    Duration? connectionTimeout,
+  }) {
+    final inner = HttpClient();
+    inner.connectionTimeout = connectionTimeout ?? _requestTimeout;
+    if (useTls) {
+      final pinned = normalizeFingerprint(pinnedCertSha256);
+      if (pinned == null) {
+        // Defensive: a pinned connection must never be created without its
+        // pin. Callers surface this as a protocol failure, not a downgrade.
+        throw const ApiException(
+          'Secure connection requested without a pinned certificate.',
+          kind: ApiFailureKind.protocol,
+        );
       }
-      return body
-          .map((item) => Clip.fromJson(item as Map<String, dynamic>))
-          .toList();
-    } on ApiException {
-      rethrow;
-    } catch (error) {
-      throw ApiException(
-        'The PC returned an invalid clip list. Restart ShadowPlay and try again.',
-        kind: ApiFailureKind.malformedResponse,
-      );
+      inner.badCertificateCallback =
+          (cert, host, port) => certificateMatchesPin(cert, pinned);
+    }
+    return inner;
+  }
+
+  static http.Client transportClient(Connection connection,
+      {Duration? connectionTimeout}) {
+    final inner = ioClient(
+      useTls: connection.usesTls,
+      pinnedCertSha256: connection.certSha256,
+      connectionTimeout: connectionTimeout,
+    );
+    return http_io.IOClient(inner);
+  }
+
+  /// SHA-256 pin check for a presented certificate.
+  static bool certificateMatchesPin(
+      X509Certificate cert, String pinnedNormalized) {
+    try {
+      final digest = sha256.convert(cert.der).toString();
+      return _constantTimeHexEquals(digest, pinnedNormalized.toLowerCase());
+    } catch (_) {
+      return false;
     }
   }
 
-  Future<ServerInfo> serverInfo() async {
-    final response = await _withTimeout(
-      http.get(_uri('/server'), headers: _headers),
-      _requestTimeout,
-      _uri('/server'),
-    );
-    _check(response.statusCode, _uri('/server'));
-    try {
-      final body = jsonDecode(response.body);
-      if (body is! Map<String, dynamic>) {
-        throw const FormatException('Expected a server object.');
-      }
-      _checkApiCompatibility(body);
-      return ServerInfo.fromJson(body);
-    } catch (error) {
-      if (error is ApiException) rethrow;
-      throw const ApiException(
-        'The PC returned an invalid server response. Restart ShadowPlay and try again.',
-        kind: ApiFailureKind.malformedResponse,
-      );
+  static bool _constantTimeHexEquals(String a, String b) {
+    if (a.length != b.length) return false;
+    var diff = 0;
+    for (var i = 0; i < a.length; i++) {
+      diff |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
     }
+    return diff == 0;
   }
 
-  Future<http.StreamedResponse> startDownload(Clip clip) async {
-    final request = http.Request('GET', clipStreamUri(clip));
-    request.headers.addAll(_headers);
-    final response = await _withTimeout(
-      request.send(),
-      _requestTimeout,
-      request.url,
-    );
-    _check(response.statusCode, request.url);
-    return response;
+  // ------------------------------------------------------------- requests
+
+  Future<List<Clip>> clips({http.Client? client}) async {
+    final uri = _uri('/clips');
+    return _run(
+        client: client,
+        uri: uri,
+        body: (owned) async {
+          final response =
+              await _withTimeout(owned.get(uri, headers: _headers), uri);
+          _check(response.statusCode, uri);
+          try {
+            final body = jsonDecode(response.body);
+            if (body is! List<dynamic>) {
+              throw const FormatException('Expected a clip list.');
+            }
+            return body
+                .map((item) => Clip.fromJson(item as Map<String, dynamic>))
+                .toList();
+          } on ApiException {
+            rethrow;
+          } catch (error) {
+            throw ApiException(
+              'The PC returned an invalid clip list. Restart ShadowPlay and try again.',
+              kind: ApiFailureKind.malformedResponse,
+            );
+          }
+        });
+  }
+
+  Future<ServerInfo> serverInfo({http.Client? client}) async {
+    final uri = _uri('/server');
+    return _run(
+        client: client,
+        uri: uri,
+        body: (owned) async {
+          final response =
+              await _withTimeout(owned.get(uri, headers: _headers), uri);
+          _check(response.statusCode, uri);
+          try {
+            final body = jsonDecode(response.body);
+            if (body is! Map<String, dynamic>) {
+              throw const FormatException('Expected a server object.');
+            }
+            _checkApiCompatibility(body);
+            return ServerInfo.fromJson(body);
+          } catch (error) {
+            if (error is ApiException) rethrow;
+            throw const ApiException(
+              'The PC returned an invalid server response. Restart ShadowPlay and try again.',
+              kind: ApiFailureKind.malformedResponse,
+            );
+          }
+        });
   }
 
   Future<List<int>> thumbnail(Clip clip, {http.Client? client}) async {
     final uri = _uri('/clips/${clip.id}/thumbnail');
-    final response = await _withTimeout(
-      client?.get(uri, headers: _headers) ?? http.get(uri, headers: _headers),
-      _requestTimeout,
-      uri,
-    );
-    _check(response.statusCode, uri);
-    return response.bodyBytes;
+    return _run(
+        client: client,
+        uri: uri,
+        body: (owned) async {
+          final response =
+              await _withTimeout(owned.get(uri, headers: _headers), uri);
+          _check(response.statusCode, uri);
+          return response.bodyBytes;
+        });
   }
+
+  /// Opens a resumable download segment. The returned [DownloadSegment] owns
+  /// its transport and must be disposed after the body is consumed.
+  Future<DownloadSegment> openDownload(Clip clip, {int? rangeStart}) async {
+    final uri = clipStreamUri(clip);
+    final inner = http_io.IOClient(
+      ioClient(
+        useTls: connection.usesTls,
+        pinnedCertSha256: connection.certSha256,
+      ),
+    );
+    try {
+      final request = http.Request('GET', uri);
+      request.headers.addAll(_headers);
+      if (rangeStart != null && rangeStart > 0) {
+        request.headers['Range'] = 'bytes=$rangeStart-';
+      }
+      final response = await _withTimeout(request.send(), uri);
+      if (response.statusCode == 401 ||
+          response.statusCode == 403 ||
+          response.statusCode == 404) {
+        _check(response.statusCode, uri);
+      }
+      return _segmentFrom(response, () async {
+        inner.close();
+      });
+    } on ApiException {
+      inner.close();
+      rethrow;
+    } catch (error) {
+      inner.close();
+      rethrow;
+    }
+  }
+
+  static DownloadSegment _segmentFrom(
+      http.StreamedResponse response, Future<void> Function() dispose) {
+    final headers = response.headers;
+    final contentLength =
+        response.contentLength != null && response.contentLength! >= 0
+            ? response.contentLength
+            : _parseNullableInt(headers['content-length']);
+
+    int? rangeStart;
+    int? rangeTotal;
+    final contentRange = headers['content-range'];
+    if (contentRange != null) {
+      final full =
+          RegExp(r'^bytes\s+(\d+)-(\d+)/(\d+)$').firstMatch(contentRange);
+      if (full != null) {
+        rangeStart = int.parse(full.group(1)!);
+        rangeTotal = int.parse(full.group(3)!);
+      } else {
+        // 416 responses use `bytes */total` (no satisfiable range).
+        final starOnly = RegExp(r'^bytes\s+\*/(\d+)$').firstMatch(contentRange);
+        if (starOnly != null) {
+          rangeTotal = int.parse(starOnly.group(1)!);
+        }
+      }
+    }
+
+    return DownloadSegment(
+      statusCode: response.statusCode,
+      body: response.stream,
+      dispose: dispose,
+      contentLength: contentLength,
+      contentRangeStart: rangeStart,
+      contentRangeTotal: rangeTotal,
+    );
+  }
+
+  static int? _parseNullableInt(String? value) =>
+      value == null ? null : int.tryParse(value.trim());
+
+  // -------------------------------------------------------------- pairing
 
   static Future<Map<String, dynamic>> health({
     required String address,
     required int port,
     http.Client? client,
+    bool useTls = false,
+    String? pinnedCertSha256,
   }) async {
-    final uri = _endpointUri(address, port, '/health');
-    final ownedClient = client ?? http.Client();
+    final uri = _endpointUri(address, port, '/health', useTls: useTls);
+    final ownedClient = _ownedStaticClient(client, useTls, pinnedCertSha256);
     try {
-      final response = await _withTimeout(
-        ownedClient.get(uri),
-        _pairingTimeout,
-        uri,
-      );
+      final response =
+          await _withTimeout(ownedClient.get(uri), uri, pairing: true);
       _check(response.statusCode, uri);
       try {
         final body = jsonDecode(response.body);
@@ -166,13 +309,21 @@ class ShadowPlayApi {
     required String code,
     required String deviceName,
     http.Client? client,
+    bool useTls = false,
+    String? pinnedCertSha256,
   }) async {
-    final uri = _endpointUri(address, port, '/pair/exchange');
-    final ownedClient = client ?? http.Client();
+    final uri = _endpointUri(address, port, '/pair/exchange', useTls: useTls);
+    final ownedClient = _ownedStaticClient(client, useTls, pinnedCertSha256);
     try {
       // Do not consume the one-time code until the phone has proved that the
       // decoded address is reachable and is speaking the expected API.
-      await health(address: address, port: port, client: ownedClient);
+      await health(
+        address: address,
+        port: port,
+        client: ownedClient,
+        useTls: useTls,
+        pinnedCertSha256: pinnedCertSha256,
+      );
 
       final response = await _withTimeout(
         ownedClient.post(
@@ -180,8 +331,8 @@ class ShadowPlayApi {
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'pairingCode': code, 'deviceName': deviceName}),
         ),
-        _pairingTimeout,
         uri,
+        pairing: true,
       );
       _check(response.statusCode, uri);
       try {
@@ -202,12 +353,48 @@ class ShadowPlayApi {
     }
   }
 
-  static Uri _endpointUri(String address, int port, String path) => Uri(
-        scheme: 'http',
-        host: address,
-        port: port,
-        path: '/api/v1$path',
+  static http.Client _ownedStaticClient(
+      http.Client? provided, bool useTls, String? pinnedCertSha256) {
+    if (provided != null) return provided;
+    if (useTls) {
+      return http_io.IOClient(
+        ioClient(
+          useTls: true,
+          pinnedCertSha256: pinnedCertSha256,
+          connectionTimeout: _pairingTimeout,
+        ),
       );
+    }
+    return http.Client();
+  }
+
+  static Uri _endpointUri(String address, int port, String path,
+      {required bool useTls}) {
+    return Uri(
+      scheme: useTls ? 'https' : 'http',
+      host: address,
+      port: port,
+      path: '/api/v1$path',
+    );
+  }
+
+  // ------------------------------------------------------------- plumbing
+
+  /// Runs [body] with an owned (or provided) transport, closing the owned
+  /// transport after the request completes.
+  static Future<T> _run<T>({
+    required http.Client? client,
+    required Uri uri,
+    required Future<T> Function(http.Client owned) body,
+  }) async {
+    if (client != null) return body(client);
+    final owned = http.Client();
+    try {
+      return await body(owned);
+    } finally {
+      owned.close();
+    }
+  }
 
   static void _check(int statusCode, Uri uri) {
     if (statusCode == 409) {
@@ -249,9 +436,10 @@ class ShadowPlayApi {
 
   static Future<T> _withTimeout<T>(
     Future<T> request,
-    Duration timeout,
-    Uri uri,
-  ) async {
+    Uri uri, {
+    bool pairing = false,
+  }) async {
+    final timeout = pairing ? _pairingTimeout : _requestTimeout;
     try {
       return await request.timeout(timeout);
     } on TimeoutException {
@@ -261,9 +449,24 @@ class ShadowPlayApi {
       );
     } on SocketException catch (error) {
       throw _transportError(error, uri);
+    } on HandshakeException catch (error) {
+      throw _tlsError(error, uri);
     } on http.ClientException catch (error) {
+      // http's ClientException carries no cause object; the message usually
+      // names the underlying peer reset. Keep the generic network mapping —
+      // handshake failures surface directly as HandshakeException through
+      // dart:io transports, so TLS trust errors are not lost here.
       throw _transportError(error, uri);
     }
+  }
+
+  static ApiException _tlsError(HandshakeException error, Uri uri) {
+    return ApiException(
+      'ShadowPlay could not verify the PC identity over the encrypted link '
+      '(${uri.host}:${uri.port}). The PC certificate may have changed; '
+      're-pair the phone from the QR code on the PC.',
+      kind: ApiFailureKind.tlsUntrusted,
+    );
   }
 
   static ApiException _transportError(Object error, Uri uri) {

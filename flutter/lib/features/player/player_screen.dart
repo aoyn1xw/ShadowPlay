@@ -4,22 +4,31 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../core/diagnostics.dart';
 import '../../core/models.dart';
 import '../../core/shadowplay_api.dart';
 import '../../shared/widgets.dart';
 
 class PlayerScreen extends StatefulWidget {
-  PlayerScreen.local({required DownloadedClip clip, super.key})
-      : clip = clip.asRemoteClip(),
+  PlayerScreen.local({
+    required DownloadedClip clip,
+    this.diagnostics,
+    super.key,
+  })  : clip = clip.asRemoteClip(),
         localPath = clip.localPath,
         api = null;
 
-  const PlayerScreen.remote({required this.clip, required this.api, super.key})
-      : localPath = null;
+  const PlayerScreen.remote({
+    required this.clip,
+    required this.api,
+    this.diagnostics,
+    super.key,
+  }) : localPath = null;
 
   final Clip clip;
   final String? localPath;
   final ShadowPlayApi? api;
+  final Diagnostics? diagnostics;
 
   bool get isRemote => api != null;
 
@@ -36,6 +45,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    widget.diagnostics?.debug('playback', 'Player opened', {
+      'clip': widget.clip.fileName,
+      'source': widget.isRemote ? 'PC stream' : 'downloaded file',
+    });
     final path = widget.localPath;
     _controller = path != null
         ? VideoPlayerController.file(File(path))
@@ -43,13 +56,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
             widget.api!.clipStreamUri(widget.clip),
             httpHeaders: widget.api!.authorizationHeaders,
           );
-    _initialized = _controller.initialize().then((_) {
+    _initialized = _initialize();
+  }
+
+  Future<void> _initialize() async {
+    try {
+      await _controller.initialize();
       if (!mounted) return;
       _controller.addListener(_videoChanged);
       _listenerAttached = true;
+      _diagnostics?.info('playback', 'Playback opened', {
+        'clip': widget.clip.fileName,
+        'duration': _controller.value.duration.inSeconds,
+      });
       setState(() {});
-    });
+    } catch (error) {
+      _diagnostics?.error('playback', 'Player failed to initialize', {
+        'clip': widget.clip.fileName,
+        'error': '$error',
+      });
+      rethrow;
+    }
   }
+
+  Diagnostics? get _diagnostics => widget.diagnostics;
 
   void _videoChanged() {
     if (mounted) setState(() {});
@@ -76,6 +106,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    widget.diagnostics?.debug('playback', 'Player closed', {
+      'clip': widget.clip.fileName,
+      'position': _controller.value.position.inSeconds,
+    });
     if (_listenerAttached) _controller.removeListener(_videoChanged);
     _controller.dispose();
     _restoreOrientation();

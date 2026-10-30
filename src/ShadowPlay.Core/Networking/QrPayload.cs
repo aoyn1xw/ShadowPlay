@@ -26,7 +26,18 @@ public sealed record QrPayload
     [JsonPropertyName("pairingCode")]
     public string PairingCode { get; init; } = string.Empty;
 
-    public const int CurrentProtocolVersion = 1;
+    /// <summary>Pinned-TLS listener port. Null/absent for HTTP-only servers.</summary>
+    [JsonPropertyName("httpsPort")]
+    public int? HttpsPort { get; init; }
+
+    /// <summary>
+    /// Uppercase hex SHA-256 fingerprint of the TLS leaf certificate. Phones
+    /// pin this at pairing time; it is never changed by later HTTP exchanges.
+    /// </summary>
+    [JsonPropertyName("certSha256")]
+    public string? CertSha256 { get; init; }
+
+    public const int CurrentProtocolVersion = 2;
 
     private static readonly System.Text.Json.JsonSerializerOptions JsonOptions = new()
     {

@@ -28,7 +28,7 @@ public static class LanApiEndpoints
             serverVersion = options.ServerVersion,
             apiVersion = LanApiOptions.ApiVersion,
             capabilities = options.Capabilities,
-            protocolVersion = QrPayload.CurrentProtocolVersion,
+            protocolVersion = LanApiOptions.ApiVersion,
             timeUtc = DateTimeOffset.UtcNow,
         }));
 
@@ -150,15 +150,21 @@ public static class LanApiEndpoints
             ? $"{BasePath}/clips/{info.Id}/thumbnail"
             : null);
 
-    private static ServerDto ToServerDto(LanApiOptions options) => new(
-        options.ServerInfo.ServerId,
-        options.ServerInfo.ComputerName,
-        QrPayload.CurrentProtocolVersion,
-        options.ServerInfo.StartedUtc,
-        options.Catalog.GetClips().Count,
-        options.ServerVersion,
-        LanApiOptions.ApiVersion,
-        options.Capabilities);
+    private static ServerDto ToServerDto(LanApiOptions options) =>
+        new(
+            options.ServerInfo.ServerId,
+            options.ServerInfo.ComputerName,
+            QrPayload.CurrentProtocolVersion,
+            options.ServerInfo.StartedUtc,
+            options.Catalog.GetClips().Count,
+            options.ServerVersion,
+            LanApiOptions.ApiVersion,
+            options.Capabilities,
+            options.HttpsCertificate is null ? null : options.HttpsPort,
+            options.HttpsCertificate is null
+                ? null
+                : options.HttpsCertificate.GetCertHashString(
+                    System.Security.Cryptography.HashAlgorithmName.SHA256));
 
     /// <summary>
     /// Clip IDs are 64 hex characters. Anything else (including path-like input)

@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
+  crypto: ^3.0.0
   http: ^1.5.0
   mobile_scanner: ^7.4.2
   path_provider: ^2.1.5

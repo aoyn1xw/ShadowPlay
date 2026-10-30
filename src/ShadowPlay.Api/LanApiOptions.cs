@@ -44,6 +44,18 @@ public sealed class LanApiOptions
     /// <summary>Optional hook for tests or alternate transports.</summary>
     public Action<Microsoft.AspNetCore.Hosting.IWebHostBuilder>? ConfigureWebHost { get; init; }
 
+    /// <summary>
+    /// Self-signed listener certificate for pinned LAN HTTPS. Null starts
+    /// HTTP-only (legacy behaviour); when present, Kestrel additionally
+    /// listens on <see cref="HttpsPort"/> over TLS. Clients pin the leaf
+    /// certificate's SHA-256 fingerprint, which is distributed through the
+    /// pairing QR code and server DTO.
+    /// </summary>
+    public System.Security.Cryptography.X509Certificates.X509Certificate2? HttpsCertificate { get; init; }
+
+    /// <summary>TCP port for the TLS listener. 0 lets the OS pick a free port.</summary>
+    public int HttpsPort { get; init; }
+
     /// <summary>Fresh bearer tokens are only ever returned here, once per pairing.</summary>
     public static readonly string ApiTitle = "ShadowPlay LAN API";
 

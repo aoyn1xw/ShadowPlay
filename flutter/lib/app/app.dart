@@ -4,26 +4,60 @@ import '../core/app_state.dart';
 import '../features/onboarding/onboarding_flow.dart';
 import '../features/shell/main_shell.dart';
 
-class ShadowPlayApp extends StatelessWidget {
+class ShadowPlayApp extends StatefulWidget {
   const ShadowPlayApp({required this.state, super.key});
 
   final AppState state;
 
   @override
+  State<ShadowPlayApp> createState() => _ShadowPlayAppState();
+}
+
+class _ShadowPlayAppState extends State<ShadowPlayApp>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState lifecycle) {
+    // Foreground/background transitions help correlate "it only happens in
+    // the background" issues. Debug level keeps normal mode quiet.
+    switch (lifecycle) {
+      case AppLifecycleState.resumed:
+        widget.state.diagnostics.debug('app', 'App resumed');
+      case AppLifecycleState.paused:
+        widget.state.diagnostics.debug('app', 'App paused');
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        break;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) => AnimatedBuilder(
-        animation: state,
+        animation: widget.state,
         builder: (context, _) => MaterialApp(
           title: 'ShadowPlay',
           debugShowCheckedModeBanner: false,
           theme: _theme(Brightness.light),
           darkTheme: _theme(Brightness.dark),
-          themeMode: state.themeMode,
-          home: state.needsOnboarding
+          themeMode: widget.state.themeMode,
+          home: widget.state.needsOnboarding
               ? OnboardingFlow(
-                  state: state,
-                  onFinished: state.completeOnboarding,
+                  state: widget.state,
+                  onFinished: widget.state.completeOnboarding,
                 )
-              : MainShell(state: state),
+              : MainShell(state: widget.state),
         ),
       );
 

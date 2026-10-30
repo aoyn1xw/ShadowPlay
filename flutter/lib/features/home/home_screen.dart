@@ -107,7 +107,10 @@ class HomeScreen extends StatelessWidget {
                     ),
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
-                        builder: (_) => PlayerScreen.local(clip: clip),
+                        builder: (_) => PlayerScreen.local(
+                          clip: clip,
+                          diagnostics: state.diagnostics,
+                        ),
                       ),
                     ),
                   );

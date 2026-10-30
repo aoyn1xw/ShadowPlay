@@ -10,4 +10,10 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Lets ShadowPlay.Tests exercise internal helpers (SAN parsing, address
+         coverage) without exposing them publicly. -->
+    <InternalsVisibleTo Include="ShadowPlay.Tests" />
+  </ItemGroup>
+
 </Project>
