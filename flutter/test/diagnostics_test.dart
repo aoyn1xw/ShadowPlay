@@ -27,11 +27,12 @@ void main() {
 
   group('redaction of secrets and private paths', () {
     test('drops bearer tokens from free text', () {
-      final result = redact(
-          'Auth failure for Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload');
-      expect(result, isNot(contains('eyJhbGciOiJIUzI1NiJ9')));
-      expect(result, contains('Bearer ●●●'));
-      expect(result, contains('Auth failure for'));
+      // Deliberately synthetic: never use a captured device credential here.
+      final syntheticToken =
+          'diagnostics-test-${List<int>.generate(32, (i) => i % 10).join()}';
+      final result =
+          redact('Auth failure for Authorization: Bearer $syntheticToken');
+      expect(result, 'Auth failure for Authorization: Bearer ●●●');
     });
 
     test('drops authorization header values in JSON form', () {
